@@ -1,30 +1,30 @@
-SKBO,Bogota,Colombia,430
-SEQM,Quito,Ecuador,410
-SVMI,Caracas,Venezuela,400
-SBBR,Brasilia,Brasil,480
-SPIM,Lima,Perú,440
-SLLP,La Paz,Bolivia,420
-SCEL,Santiago de Chile,Chile,460
-SABE,Buenos Aires,Argentina,460
-SGAS,Asunción,Paraguay,400
-SUAA,Motenvideo,Uruguay,400
-LATI,Tirana,Albania,410
-EDDI,Berlin,Alemania,480
-LOWW,Viena,Austria,430
-EBCI,Bruselas,Belgica,440
-UMMS,Minsk,Bielorrusia,400
-LBSF,Sofia,Bulgaria,400
-LKPR,Praga,Checa,400
-LDZA,Zagreb,Croacia,420
-EKCH,Copenhague,Dinamarca,480
-EHAM,Amsterdam,Holanda,480
-VIDP,Delhi,India,480
-OSDI,Damasco,Siria,400
-OERK,Riad,Arabia Saudita,420
-OMDB,Dubai,Emiratos A.U,420
-OAKB,Kabul,Afganistan,480
-OOMS,Mascate,Oman,460
-OYSN,Sana,Yemen,420
-OPKC,Karachi,Pakistan,410
-UBBB,Baku,Azerbaiyan,400
-OJAI,Aman,Jordania,400
+01,SKBO,Bogota,Colombia,bogo,-5,430,04°42'05"N,74°08'49"W,AM
+02,SEQM,Quito,Ecuador,quit,-5,410,00°06'48"N,78°21'31"W,AM
+03,SVMI,Caracas,Venezuela,cara,-4,400,10°36'11"N,66°59'26"W,AM
+04,SBBR,Brasilia,Brasil,bras,-3,480,15°51'53"S,47°55'05"W,AM
+05,SPIM,Lima,Perú,lima,-5,440,12°01'19"S,77°06'52"W,AM
+06,SLLP,La Paz,Bolivia,lapa,-4,420,16°30'47"S,68°11'32"W,AM
+07,SCEL,Santiago de Chile,Chile,sant,-3,460,33°23'47"S,70°47'41"W,AM
+08,SABE,Buenos Aires,Argentina,buen,-3,460,34°33'33"S,58°24'56"W,AM
+09,SGAS,Asunción,Paraguay,asun,-4,400,25°14'24"S,57°31'12"W,AM
+10,SUAA,Motenvideo,Uruguay,mont,-3,400,34°47'21"S,56°15'53"W,AM
+11,LATI,Tirana,Albania,tira,+2,410,41°24'53"N,19°43'14"E,EU
+12,EDDI,Berlin,Alemania,berl,+2,480,52°28'25"N,13°24'06"E,EU
+13,LOWW,Viena,Austria,vien,+2,430,48°06'39"N,16°34'15"E,EU
+14,EBCI,Bruselas,Belgica,brus,+2,440,50°27'33"N,04°27'13"E,EU
+15,UMMS,Minsk,Bielorrusia,mins,+3,400,53°52'57"N,28°01'57"E,EU
+16,LBSF,Sofia,Bulgaria,sofi,+3,400,42°41'25"N,23°24'17"E,EU
+17,LKPR,Praga,Checa,prag,+2,400,50°06'05"N,14°15'56"E,EU
+18,LDZA,Zagreb,Croacia,zagr,+2,420,45°44'34"N,16°04'07"E,EU
+19,EKCH,Copenhague,Dinamarca,cope,+2,480,55°37'05"N,12°39'22"E,EU
+20,EHAM,Amsterdam,Holanda,amst,+2,480,52°18'00"N,04°45'54"E,EU
+21,VIDP,Delhi,India,delh,+5,480,28°33'59"N,77°06'11"E,AS
+22,OSDI,Damasco,Siria,dama,+3,400,33°24'41"N,36°30'56"E,AS
+23,OERK,Riad,Arabia Saudita,riad,+3,420,24°57'28"N,46°41'56"E,AS
+24,OMDB,Dubai,Emiratos A.U,emir,+4,420,25°15'10"N,55°21'52"E,AS
+25,OAKB,Kabul,Afganistan,kabu,+4,480,34°33'56"N,69°12'39"E,AS
+26,OOMS,Mascate,Oman,masc,+4,460,23°35'22"N,58°17'03"E,AS
+27,OYSN,Sana,Yemen,sana,+3,420,15°28'34"N,44°13'11"E,AS
+28,OPKC,Karachi,Pakistan,kara,+5,410,24°54'00"N,67°09'00"E,AS
+29,UBBB,Baku,Azerbaiyan,baku,+2,400,40°28'02"N,50°02'48"E,AS
+30,OJAI,Aman,Jordania,aman,+3,400,31°43'21"N,35°59'36"E,AS
