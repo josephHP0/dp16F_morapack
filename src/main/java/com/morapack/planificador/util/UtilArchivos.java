@@ -53,7 +53,7 @@ public class UtilArchivos {
         String latitud = partes[7].trim();
         String longitud = partes[8].trim();
         String continente = partes[9].trim(); // Nuevo campo
-        return new Aeropuerto(id, codigo, ciudad, pais, abrev, gmt, capacidad, latitud, longitud, continente);
+        return new Aeropuerto(id, codigo, ciudad, pais, abrev, gmt, capacidad, latitud, longitud, continente, 0);
     }
 
     public static List<Vuelo> cargarVuelos(Path p, Map<String, Aeropuerto> aeropuertos) throws IOException {
@@ -151,5 +151,32 @@ public class UtilArchivos {
                         asg.paquetesPendientes));
             }
         }
+    }
+
+    public static double distanciaKm(Aeropuerto a1, Aeropuerto a2) {
+        double lat1 = parseLatLon(a1.getLatitud());
+        double lon1 = parseLatLon(a1.getLongitud());
+        double lat2 = parseLatLon(a2.getLatitud());
+        double lon2 = parseLatLon(a2.getLongitud());
+        double R = 6371.0; // Radio de la Tierra en km
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double la1 = Math.toRadians(lat1);
+        double la2 = Math.toRadians(lat2);
+        double a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+                Math.sin(dLon/2)*Math.sin(dLon/2)*Math.cos(la1)*Math.cos(la2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    // Convierte "04°42'05\"N" o "74°08'49\"W" a decimal
+    public static double parseLatLon(String s) {
+        s = s.replace("°", " ").replace("'", " ").replace("\"", " ");
+        String[] parts = s.trim().split("\\s+");
+        double deg = Double.parseDouble(parts[0]);
+        double min = Double.parseDouble(parts[1]);
+        double sec = Double.parseDouble(parts[2]);
+        double sign = (s.contains("S") || s.contains("W")) ? -1 : 1;
+        return sign * (deg + min/60.0 + sec/3600.0);
     }
 }

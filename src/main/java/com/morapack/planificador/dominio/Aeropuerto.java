@@ -11,10 +11,11 @@ public class Aeropuerto {
     public String latitud;
     public String longitud;
     public String continente;
+    public int cargaEntrante = 0;
 
     public Aeropuerto(int id, String codigo, String ciudad, String pais, 
         String abreviaturaCiudad, int gmt, int capacidad, String latitud, 
-            String longitud, String continente) {
+            String longitud, String continente, int cargaEntrante) {
         this.id = id;
         this.codigo = codigo;
         this.ciudad = ciudad;
@@ -84,5 +85,14 @@ public class Aeropuerto {
     public String getContinente() {
         return continente;
     }
+    public void setContinente(String continente) {
+        this.continente = continente;
+    }
+    public int getCargaEntrante() {
+        return cargaEntrante;
+    }
+    public void setCargaEntrante(int cargaEntrante) {
+        this.cargaEntrante = cargaEntrante;
+    }    
 
 }
