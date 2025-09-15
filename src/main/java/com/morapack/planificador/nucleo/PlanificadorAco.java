@@ -54,13 +54,12 @@ public class PlanificadorAco {
         Ruta ruta = new Ruta();
         ruta.nodos.add(hub);
 
-        for (int s=0; s<pasosMax && horas <= presupuestoHoras; s++) {
+        for (int s = 0; s < pasosMax && horas <= presupuestoHoras; s++) {
             if (actual.equals(destino)) break;
 
             var aristas = grafo.aristasDesde(actual);
             if (aristas.isEmpty()) break;
 
-            // Filtrar candidatos por capacidad de vuelo y almacén destino
             List<GrafoVuelos.Arista> candidatos = new ArrayList<>();
             List<Double> pesos = new ArrayList<>();
 
@@ -69,7 +68,9 @@ public class PlanificadorAco {
                 Aeropuerto next = aeropuertos.get(nextIata);
 
                 if (next == null) continue;
-                if (next.capacidad > 0 && next.cargaEntrante >= next.capacidad) continue;
+
+                // Solo filtra capacidad de almacén si es el destino final
+                if (nextIata.equals(destino) && next.capacidad > 0 && next.cargaEntrante >= next.capacidad) continue;
 
                 Integer cap = capacidadRestante.get(e.vueloId);
                 if (cap == null || cap <= 0) continue;
@@ -80,7 +81,8 @@ public class PlanificadorAco {
                 double tauVal = tau[e.vueloId];
                 double heurVal = heuristica[e.vueloId];
                 double eps = 1e-9;
-                double score = Math.pow(Math.max(tauVal, eps), 1.0) * Math.pow(Math.max(heurVal, eps), 1.0);
+                double alpha = 1.0, beta = 2.0; // puedes parametrizar
+                double score = Math.pow(Math.max(tauVal, eps), alpha) * Math.pow(Math.max(heurVal, eps), beta);
                 candidatos.add(e);
                 pesos.add(score);
             }
@@ -88,12 +90,16 @@ public class PlanificadorAco {
             if (candidatos.isEmpty()) break;
 
             // Ruleta proporcional
-            double suma = pesos.stream().mapToDouble(d->d).sum();
-            double r = rnd.nextDouble() * (suma<=0?1.0:suma);
-            double acc = 0.0; int idx = 0;
-            for (int i=0;i<candidatos.size();i++) {
-                acc += (suma<=0? (1.0/candidatos.size()) : pesos.get(i));
-                if (r <= acc) { idx = i; break; }
+            double suma = pesos.stream().mapToDouble(d -> d).sum();
+            double r = rnd.nextDouble() * (suma <= 0 ? 1.0 : suma);
+            double acc = 0.0;
+            int idx = candidatos.size() - 1; // por defecto el último
+            for (int i = 0; i < candidatos.size(); i++) {
+                acc += (suma <= 0 ? (1.0 / candidatos.size()) : pesos.get(i));
+                if (r <= acc) {
+                    idx = i;
+                    break;
+                }
             }
             var elegido = candidatos.get(idx);
 
@@ -144,9 +150,9 @@ public class PlanificadorAco {
                 continue;
             }
             double dist = UtilArchivos.distanciaKm(a1, a2);
-            double durHoras = (v.horasDuracion > 12) ? v.horasDuracion / 60.0 : v.horasDuracion;
+            double durHoras = v.horasDuracion;
             if (dist <= 0 || Double.isInfinite(dist) || Double.isNaN(dist)) dist = 1e6;
-            heurVal = 1.0 / (dist * Math.max(0.001, durHoras) + 1.0);
+            heurVal = 1.0 / (dist/1000.0 + durHoras + 1.0);
             heur[v.id] = heurVal;
         }
 

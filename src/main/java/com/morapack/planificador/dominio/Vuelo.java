@@ -18,7 +18,7 @@ public class Vuelo {
         this.salidaMin = salidaMin;
         this.llegadaMin = llegadaMin;
         this.capacidad = capacidad;
-        this.horasDuracion = duracion;
+        this.horasDuracion = duracion /60.0;
         this.esContinental = esContinental;
     }
 }
