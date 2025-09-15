@@ -1,0 +1,155 @@
+package com.morapack.planificador.util;
+
+import com.morapack.planificador.dominio.*;
+import com.morapack.planificador.nucleo.Asignacion;
+
+import java.io.*;
+import java.nio.file.*;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class UtilArchivos {
+    private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("H:mm");
+
+    private static String[] partirInteligente(String linea) {
+        String t = linea.trim();
+        if (t.isEmpty() || t.startsWith("#")) return new String[0];
+        if (t.contains(",")) return t.split("\\s*,\\s*");
+        if (t.contains(";")) return t.split("\\s*;\\s*");
+        return t.split("\\s+");
+    }
+
+    private static int parsearEntero(String s) {
+        String d = (s==null? "" : s).replaceAll("[^0-9]", "");
+        return d.isEmpty() ? 0 : Integer.parseInt(d);
+    }
+
+    private static int hhmmAMinutos(String hhmm) {
+        LocalTime t = LocalTime.parse(hhmm.trim(), HHMM);
+        return t.getHour()*60 + t.getMinute();
+    }
+
+    public static Map<String, Aeropuerto> cargarAeropuertos(Path p) throws IOException {
+        Map<String, Aeropuerto> mapa = new HashMap<>();
+        for (String linea : Files.readAllLines(p)) {
+            if (linea == null || linea.isBlank()) continue; // evita líneas vacías
+            Aeropuerto aeropuerto = parseAeropuerto(linea);
+            mapa.put(aeropuerto.getCodigo(), aeropuerto);
+        }
+        return mapa;
+    }
+
+    public static Aeropuerto parseAeropuerto(String linea) {
+        String[] partes = linea.split(",");
+        int id = Integer.parseInt(partes[0].trim());
+        String codigo = partes[1].trim();
+        String ciudad = partes[2].trim();
+        String pais = partes[3].trim();
+        String abrev = partes[4].trim();
+        int gmt = Integer.parseInt(partes[5].trim());
+        int capacidad = Integer.parseInt(partes[6].trim());
+        String latitud = partes[7].trim();
+        String longitud = partes[8].trim();
+        String continente = partes[9].trim(); // Nuevo campo
+        return new Aeropuerto(id, codigo, ciudad, pais, abrev, gmt, capacidad, latitud, longitud, continente);
+    }
+
+    public static List<Vuelo> cargarVuelos(Path p, Map<String, Aeropuerto> aeropuertos) throws IOException {
+        List<Vuelo> vuelos = new ArrayList<>();
+        int id = 0;
+        for (String linea : Files.readAllLines(p)) {
+            String[] f = partirInteligente(linea);
+            if (f.length < 5) continue;
+            String origen = f[0].trim();
+            String destino = f[1].trim();
+            if (!aeropuertos.containsKey(origen) || !aeropuertos.containsKey(destino)) continue;
+
+            int salida = hhmmAMinutos(f[2]);
+            int llegada = hhmmAMinutos(f[3]);
+            int capacidad = parsearEntero(f[4]);
+
+            // Obtener GMT de origen y destino
+            int gmtOrigen = aeropuertos.get(origen).getGmt();
+            int gmtDestino = aeropuertos.get(destino).getGmt();
+
+            // Ajustar llegada a la zona horaria del origen
+            int llegadaEnOrigen = llegada - (gmtDestino - gmtOrigen) * 60;
+
+            // Calcular duración real
+            int duracion = llegadaEnOrigen - salida;
+            if (duracion < 0) duracion += 24 * 60; // si cruza medianoche
+
+            // ...existing code...
+            String continenteOrigen = aeropuertos.get(origen).getContinente();
+            String continenteDestino = aeropuertos.get(destino).getContinente();
+            boolean esContinental = continenteOrigen.equals(continenteDestino);
+            // ...puedes guardar este dato en el objeto Vuelo o usarlo para lógica de restricciones...
+
+            // Crea el vuelo usando la duración real
+            vuelos.add(new Vuelo(id++, origen, destino, salida, llegada, capacidad, duracion,esContinental));
+        }
+        return vuelos;
+    }
+
+    public static List<Pedido> cargarPedidos(Path p, Set<String> iatasValidas) throws IOException {
+        List<Pedido> pedidos = new ArrayList<>();
+        if (p == null || !Files.exists(p)) return pedidos;
+        for (String linea : Files.readAllLines(p)) {
+            String[] f = partirInteligente(linea);
+            if (f.length < 3) continue;
+            String id = f[0].trim();
+            String dest = f[1].trim();
+            if (!iatasValidas.contains(dest)) continue;
+            int pk = parsearEntero(f[2]);
+            pedidos.add(new Pedido(id, dest, pk));
+        }
+        return pedidos;
+    }
+
+    public static List<Pedido> generarPedidosSinteticos(Set<String> iatas, Set<String> hubs, int n, long semilla) {
+        Random rnd = new Random(semilla);
+        List<String> destinos = iatas.stream().filter(a -> !hubs.contains(a)).sorted().collect(Collectors.toList());
+        List<Pedido> lista = new ArrayList<>();
+        for (int i=1;i<=n;i++) {
+            String d = destinos.get(rnd.nextInt(destinos.size()));
+            int pk = 1 + rnd.nextInt(10);
+            lista.add(new Pedido(String.format("O%04d", i), d, pk));
+        }
+        return lista;
+    }
+
+    public static void escribirAsignacionesCSV(Path out, List<com.morapack.planificador.nucleo.Asignacion> asgs) throws IOException {
+        Files.createDirectories(out.getParent() == null ? Paths.get(".") : out.getParent());
+        try (BufferedWriter bw = Files.newBufferedWriter(out)) {
+            bw.write("order_id,hub_origen,destino,paquetes_asignados,paquetes_pendientes,hops,ruta,horas_estimadas,itinerario\n");
+            for (var a : asgs) {
+                String ruta = (a.ruta==null) ? "" : String.join(" > ", a.ruta.nodos);
+                int hops = (a.ruta==null) ? 0 : Math.max(0, a.ruta.nodos.size()-1);
+                double h = (a.ruta==null) ? Double.NaN : Math.round(a.ruta.horasTotales*100.0)/100.0;
+                String iti = (a.ruta==null || a.ruta.itinerario.isEmpty()) ? "" : String.join(" | ", a.ruta.itinerario);
+
+                bw.write(String.format(Locale.US,
+                        "%s,%s,%s,%d,%d,%d,%s,%.2f,%s\n",
+                        a.pedido.id, a.hubOrigen, a.pedido.destinoIata,
+                        a.paquetesAsignados, a.paquetesPendientes, hops, ruta, h, iti));
+            }
+        }
+    }
+    public static void escribirPlanCsv(Path salidaPath, List<Asignacion> plan) throws IOException {
+        try (BufferedWriter writer = Files.newBufferedWriter(salidaPath)) {
+            writer.write("pedido_id,hub_origen,destino,ruta,paquetes_asignados,paquetes_pendientes\n");
+            for (Asignacion asg : plan) {
+                String rutaStr = (asg.ruta == null) ? "" : String.join(" | ", asg.ruta.itinerario);
+                writer.write(String.format("%s,%s,%s,%s,%d,%d\n",
+                        asg.pedido.id,
+                        asg.hubOrigen,
+                        asg.pedido.destinoIata,
+                        rutaStr,
+                        asg.paquetesAsignados,
+                        asg.paquetesPendientes));
+            }
+        }
+    }
+}

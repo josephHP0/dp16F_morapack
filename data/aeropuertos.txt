@@ -1,0 +1,30 @@
+SKBO,Bogota,Colombia,430
+SEQM,Quito,Ecuador,410
+SVMI,Caracas,Venezuela,400
+SBBR,Brasilia,Brasil,480
+SPIM,Lima,Perú,440
+SLLP,La Paz,Bolivia,420
+SCEL,Santiago de Chile,Chile,460
+SABE,Buenos Aires,Argentina,460
+SGAS,Asunción,Paraguay,400
+SUAA,Motenvideo,Uruguay,400
+LATI,Tirana,Albania,410
+EDDI,Berlin,Alemania,480
+LOWW,Viena,Austria,430
+EBCI,Bruselas,Belgica,440
+UMMS,Minsk,Bielorrusia,400
+LBSF,Sofia,Bulgaria,400
+LKPR,Praga,Checa,400
+LDZA,Zagreb,Croacia,420
+EKCH,Copenhague,Dinamarca,480
+EHAM,Amsterdam,Holanda,480
+VIDP,Delhi,India,480
+OSDI,Damasco,Siria,400
+OERK,Riad,Arabia Saudita,420
+OMDB,Dubai,Emiratos A.U,420
+OAKB,Kabul,Afganistan,480
+OOMS,Mascate,Oman,460
+OYSN,Sana,Yemen,420
+OPKC,Karachi,Pakistan,410
+UBBB,Baku,Azerbaiyan,400
+OJAI,Aman,Jordania,400
