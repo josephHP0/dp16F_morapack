@@ -38,6 +38,7 @@ public class UtilArchivos {
             Aeropuerto aeropuerto = parseAeropuerto(linea);
             mapa.put(aeropuerto.getCodigo(), aeropuerto);
         }
+        System.out.println("Aeropuertos cargados: " + String.join(", ", mapa.keySet())); // Debug line
         return mapa;
     }
 
@@ -97,13 +98,40 @@ public class UtilArchivos {
         List<Pedido> pedidos = new ArrayList<>();
         if (p == null || !Files.exists(p)) return pedidos;
         for (String linea : Files.readAllLines(p)) {
-            String[] f = partirInteligente(linea);
-            if (f.length < 3) continue;
-            String id = f[0].trim();
-            String dest = f[1].trim();
-            if (!iatasValidas.contains(dest)) continue;
-            int pk = parsearEntero(f[2]);
-            pedidos.add(new Pedido(id, dest, pk));
+            if (linea.trim().isEmpty() || linea.startsWith("#")) continue;
+            
+            // Format: dd-hh-mm-DEST-XXX-YYYYYYY
+            // dd: day (01-31)
+            // hh: hour (00-23)
+            // mm: minutes (00-59)
+            // DEST: airport code (4 chars)
+            // XXX: quantity (001-999)
+            // YYYYYYY: client ID (7 digits)
+            
+            try {
+                String[] partes = linea.split("-");
+                if (partes.length != 6) continue;
+                
+                int dia = Integer.parseInt(partes[0]);
+                int hora = Integer.parseInt(partes[1]);
+                int minuto = Integer.parseInt(partes[2]);
+                String dest = partes[3].trim();
+                int cantidad = Integer.parseInt(partes[4]);
+                String clientId = partes[5].trim();
+                
+                // Validate data
+                if (dia < 1 || dia > 31 || hora < 0 || hora > 23 || 
+                    minuto < 0 || minuto > 59 || cantidad < 1 || 
+                    !iatasValidas.contains(dest)) {
+                    System.out.println("Skipping invalid line: " + linea); // Debug line
+                    continue;
+                }
+                
+                pedidos.add(new Pedido(clientId, dest, cantidad, dia, hora, minuto));
+            } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                System.out.println("Error parsing line: " + linea + " - " + e.getMessage()); // Debug line
+                continue;
+            }
         }
         return pedidos;
     }
@@ -115,7 +143,10 @@ public class UtilArchivos {
         for (int i=1;i<=n;i++) {
             String d = destinos.get(rnd.nextInt(destinos.size()));
             int pk = 1 + rnd.nextInt(10);
-            lista.add(new Pedido(String.format("O%04d", i), d, pk));
+            int dia = 1 + rnd.nextInt(28); // Random day in month
+            int hora = rnd.nextInt(24);     // Random hour
+            int minuto = rnd.nextInt(60);   // Random minute
+            lista.add(new Pedido(String.format("%07d", i), d, pk, dia, hora, minuto));
         }
         return lista;
     }
@@ -139,16 +170,23 @@ public class UtilArchivos {
     }
     public static void escribirPlanCsv(Path salidaPath, List<Asignacion> plan) throws IOException {
         try (BufferedWriter writer = Files.newBufferedWriter(salidaPath)) {
-            writer.write("pedido_id,hub_origen,destino,ruta,paquetes_asignados,paquetes_pendientes\n");
+            writer.write("pedido_id,fecha_pedido,hub_origen,destino,ruta,paquetes_asignados,paquetes_pendientes,tiempo_entrega\n");
             for (Asignacion asg : plan) {
                 String rutaStr = (asg.ruta == null) ? "" : String.join(" | ", asg.ruta.itinerario);
-                writer.write(String.format("%s,%s,%s,%s,%d,%d\n",
+                // Format fecha as dd/HH:mm
+                String fechaPedido = String.format("%02d/%02d:%02d", 
+                    asg.pedido.dia, asg.pedido.hora, asg.pedido.minuto);
+                // Calculate delivery time based on route total hours
+                double horasEntrega = (asg.ruta == null) ? 0.0 : asg.ruta.horasTotales;
+                writer.write(String.format(Locale.US, "%s,%s,%s,%s,%s,%d,%d,%.2f\n",
                         asg.pedido.id,
+                        fechaPedido,
                         asg.hubOrigen,
                         asg.pedido.destinoIata,
                         rutaStr,
                         asg.paquetesAsignados,
-                        asg.paquetesPendientes));
+                        asg.paquetesPendientes,
+                        horasEntrega));
             }
         }
     }
