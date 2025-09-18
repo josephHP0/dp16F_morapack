@@ -19,13 +19,20 @@ public class GrafoVuelos {
     }
 
     private final Map<String, List<Arista>> ady = new HashMap<>();
+    private final List<Vuelo> vuelos;
 
     public GrafoVuelos(List<Vuelo> vuelos) {
+        this.vuelos = new ArrayList<>(vuelos); // Store a copy of the vuelos list
         for (Vuelo v : vuelos) {
             ady.computeIfAbsent(v.origen, k -> new ArrayList<>())
                     .add(new Arista(v.origen, v.destino, v.horasDuracion, v.id));
         }
     }
+
+    public List<Vuelo> getVuelos() {
+        return vuelos;
+    }
+    
 
     public List<Arista> aristasDesde(String origen) {
         return ady.getOrDefault(origen, Collections.emptyList());
