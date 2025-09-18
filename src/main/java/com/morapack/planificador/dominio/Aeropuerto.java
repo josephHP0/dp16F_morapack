@@ -1,5 +1,7 @@
 package com.morapack.planificador.dominio;
 
+import java.util.TreeMap;
+
 public class Aeropuerto {
     public int id;
     public String codigo;
@@ -12,6 +14,7 @@ public class Aeropuerto {
     public String longitud;
     public String continente;
     public int cargaEntrante = 0;
+    public TreeMap<Integer, Integer> ocupacionPorMinuto = new TreeMap<>();
 
     public Aeropuerto(int id, String codigo, String ciudad, String pais, 
         String abreviaturaCiudad, int gmt, int capacidad, String latitud, 

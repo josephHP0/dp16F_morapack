@@ -243,12 +243,18 @@ public class PlanificadorAco {
                     cuelloVuelo = Math.min(cuelloVuelo, capRest.getOrDefault(fid, 0));
                 }
                 
+
                 Aeropuerto apDest = aeropuertos.get(ped.destinoIata);
-                int remAlmacen = 0;
+                int remAlmacen = apDest != null ? apDest.capacidad : 0;
                 if (apDest != null) {
-                    remAlmacen = Math.max(0, apDest.capacidad - apDest.cargaEntrante);
+                    // Calcular minuto de llegada absoluta
+                    int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
+                    for (int m = minutoLlegada; m < minutoLlegada + 120; m++) { // 2 horas = 120 minutos
+                        int ocup = apDest.ocupacionPorMinuto.getOrDefault(m, 0);
+                        remAlmacen = Math.min(remAlmacen, apDest.capacidad - ocup);
+                    }
                 }
-                
+
                 int asignable = Math.max(0, Math.min(paquetesRestantes, Math.min(cuelloVuelo, remAlmacen)));
 
                 if (asignable > 0) {
@@ -256,12 +262,14 @@ public class PlanificadorAco {
                         capRest.put(fid, capRest.get(fid) - asignable);
                     }
                     if (apDest != null) {
-                        apDest.cargaEntrante += asignable;
+                        int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
+                        for (int m = minutoLlegada; m < minutoLlegada + 120; m++) {
+                            apDest.ocupacionPorMinuto.put(m, apDest.ocupacionPorMinuto.getOrDefault(m, 0) + asignable);
+                        }
                     }
                     asg.paquetesAsignados = asignable;
                     asg.paquetesPendientes = paquetesRestantes - asignable;
                     paquetesRestantes -= asignable;
-                    
                     rutasUsadas.add(mejor);
                     paquetesPorRuta.add(asignable);
                 }
