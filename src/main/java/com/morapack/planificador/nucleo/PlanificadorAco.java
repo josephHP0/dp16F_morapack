@@ -51,6 +51,7 @@ public class PlanificadorAco {
                                       int pasosMax, double presupuestoHoras,
                                       Map<Integer,Integer> capacidadRestante,
                                       Map<String,Aeropuerto> aeropuertos,
+                                      Map<Integer,Vuelo> vuelosPorId,
                                       int diaInicio, int horaInicio, int minutoInicio,
                                       Random rnd) {
         Set<String> visitados = new HashSet<>();
@@ -83,14 +84,8 @@ public class PlanificadorAco {
 
                 if (visitados.contains(nextIata)) continue;
 
-                // Get corresponding flight
-                Vuelo vuelo = null;
-                for (Vuelo v : grafo.getVuelos()) {
-                    if (v.id == e.vueloId) {
-                        vuelo = v;
-                        break;
-                    }
-                }
+                // Obtener vuelo del mapa
+                Vuelo vuelo = vuelosPorId.get(e.vueloId);
                 if (vuelo == null) continue;
 
                 // Check if this flight's time is compatible with current total hours
@@ -100,8 +95,8 @@ public class PlanificadorAco {
                 int minutosDelDia = (int)((horas * 60.0) % 60.0);
 
                 // Calculate actual departure time considering initial time
-                int diaActual = diaInicio + diasTranscurridos;
-                if (diaActual > 31) continue; // Past end of month
+                int diaActual = (diaInicio + diasTranscurridos - 1) % 31 + 1; // Wrap around to next month if needed
+                if (diaActual < diaInicio) continue; // No permitir días anteriores al inicio
                 
                 // Calculate if this flight's departure time works with our current time
                 int tiempoActualEnMinutos = horasDelDia * 60 + minutosDelDia;
@@ -170,6 +165,12 @@ public class PlanificadorAco {
             }
         }
 
+        // Crear mapa de vuelos por ID para acceso rápido
+        Map<Integer, Vuelo> vuelosPorId = new HashMap<>();
+        for (Vuelo v : vuelos) {
+            vuelosPorId.put(v.id, v);
+        }
+
         GrafoVuelos grafo = new GrafoVuelos(vuelos);
         double[] tau = new double[vuelos.size()];
         double[] heur = new double[vuelos.size()];
@@ -187,7 +188,9 @@ public class PlanificadorAco {
             double dist = UtilArchivos.distanciaKm(a1, a2);
             double durHoras = v.horasDuracion;
             if (dist <= 0 || Double.isInfinite(dist) || Double.isNaN(dist)) dist = 1e6;
-            heurVal = 1.0 / (dist/1000.0 + durHoras + 1.0);
+            // Favorecer vuelos con más capacidad disponible
+            double capacityBonus = v.capacidad / 100.0; // bonus por capacidad
+            heurVal = (1.0 + capacityBonus) / (dist/1000.0 + durHoras + 1.0);
             heur[v.id] = heurVal;
         }
 
@@ -206,7 +209,7 @@ public class PlanificadorAco {
                 Ruta mejorIter = null;
                 for (int h=0; h<p.hormigas; h++) {
                     Ruta r = construirRuta(hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto, capRest, aeropuertos, 
-                        ped.dia, ped.hora, ped.minuto, rnd);
+                        vuelosPorId, ped.dia, ped.hora, ped.minuto, rnd);
                     if (r != null && (mejorIter==null || r.horasTotales < mejorIter.horasTotales)) mejorIter = r;
                 }
                 // evaporación
@@ -223,7 +226,10 @@ public class PlanificadorAco {
             List<Ruta> rutasUsadas = new ArrayList<>();
             List<Integer> paquetesPorRuta = new ArrayList<>();
             
-            while (paquetesRestantes > 0 && mejor != null) {
+            // Permitir hasta 3 rutas alternativas por pedido
+            int intentosRuta = 0;
+            while (paquetesRestantes > 0 && mejor != null && intentosRuta < 3) {
+                intentosRuta++;
                 Asignacion asg = new Asignacion();
                 asg.pedido = ped;
                 asg.hubOrigen = hub;
@@ -267,12 +273,11 @@ public class PlanificadorAco {
                     mejor = null;
                     double mejorHoras = Double.POSITIVE_INFINITY;
                     
-                    // Buscar una nueva ruta evitando vuelos saturados
-                    // Usar solo 1/3 de las iteraciones y hormigas para rutas adicionales
-                    for (int it=0; it<p.iteraciones/3; it++) {
-                        for (int h=0; h<p.hormigas/3; h++) {
+                    // Búsqueda de ruta alternativa con parámetros moderados
+                    for (int it=0; it<5; it++) {  // 5 iteraciones para rutas adicionales
+                        for (int h=0; h<15; h++) {  // 15 hormigas para rutas adicionales
                             Ruta r = construirRuta(hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto, 
-                                capRest, aeropuertos, ped.dia, ped.hora, ped.minuto, rnd);
+                                capRest, aeropuertos, vuelosPorId, ped.dia, ped.hora, ped.minuto, rnd);
                             if (r != null && r.horasTotales < mejorHoras) {
                                 mejor = r;
                                 mejorHoras = r.horasTotales;
