@@ -217,4 +217,34 @@ public class UtilArchivos {
         double sign = (s.contains("S") || s.contains("W")) ? -1 : 1;
         return sign * (deg + min/60.0 + sec/3600.0);
     }
+    
+    public static List<CancelacionVuelo> cargarCancelaciones(Path p) throws IOException {
+        List<CancelacionVuelo> cancelaciones = new ArrayList<>();
+        if (p == null || !Files.exists(p)) return cancelaciones;
+        
+        for (String linea : Files.readAllLines(p)) {
+            if (linea.trim().isEmpty() || linea.startsWith("#")) continue;
+            
+            try {
+                // Formato: dd.ORIG-DEST-HHmm
+                String[] partesPunto = linea.split("\\.");
+                if (partesPunto.length != 2) continue;
+                
+                int dia = Integer.parseInt(partesPunto[0]);
+                String[] partesGuion = partesPunto[1].split("-");
+                if (partesGuion.length != 3) continue;
+                
+                String origen = partesGuion[0].trim();
+                String destino = partesGuion[1].trim();
+                int horaCancelacion = Integer.parseInt(partesGuion[2]);
+                
+                cancelaciones.add(new CancelacionVuelo(dia, origen, destino, horaCancelacion));
+            } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                System.out.println("Error parsing cancellation line: " + linea + " - " + e.getMessage());
+                continue;
+            }
+        }
+        
+        return cancelaciones;
+    }
 }
