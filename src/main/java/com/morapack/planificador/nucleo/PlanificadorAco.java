@@ -1,307 +1,354 @@
 package com.morapack.planificador.nucleo;
 
 import com.morapack.planificador.dominio.*;
-import com.morapack.planificador.util.UtilArchivos;
 import java.util.*;
+// src/main/java/com/morapack/planner/aco/PlanificadorAco.java
 
-public class PlanificadorAco {
+import com.morapack.planificador.nucleo.ReplanificadorAco.SemillaFeromonaSupport;
 
-    // Región por IATA calculada desde el archivo de aeropuertos
-    private static final Map<String,String> REGION_BY_IATA = new HashMap<>();
+/**
+ * Planificador ACO con soporte de semillas de feromona para replanificación incremental.
+ * - planificarInicial: para el plan base semanal.
+ * - planificarPedidos: recalcula un subconjunto (p. ej., impactados por cancelación).
+ *
+ * NOTA: Este esqueleto deja bien definidos los puntos de integración con tu grafo y validadores de negocio.
+ */
+public class PlanificadorAco implements SemillaFeromonaSupport {
 
-    // Hubs por región
-    public static final Map<String,String> HUBS = Map.of(
-            "SPIM","AM",  // Lima
-            "EBCI","EU",  // Bruselas
-            "UBBB","AS"   // Bakú
-    );
+    // =======================
+    // Campos y configuración
+    // =======================
+    private final Random rng;
 
-    static String regionDe(String iata) {
-        if (iata == null) return "EU";
-        String r = REGION_BY_IATA.get(iata);
-        if (r != null) return r;
-        return "EU"; // Valor por defecto
+    // Semillas opcionales (inyectadas por el replanificador):
+    private Map<Integer, Double> semillasPorVueloId = new HashMap<>();
+    private Map<String,  Double> semillasPorLlave   = new HashMap<>();
+
+    // Feromonas (por vueloId). Si manejas feromonas por arista, este map es suficiente:
+    private final Map<Integer, Double> tau = new HashMap<>();
+
+    public PlanificadorAco() {
+        this.rng = new Random(42);
     }
 
-    static String hubParaDestino(String destino) {
-        String region = regionDe(destino);
-        switch (region) {
-            case "AM": return "SPIM";   // Lima
-            case "EU": return "EBCI";   // Bruselas
-            case "AS": return "UBBB";   // Bakú
-            default:   return "EBCI";
-        }
+    public PlanificadorAco(long seed) {
+        this.rng = new Random(seed);
     }
 
-    static double slaHoras(String hub, String dest) {
-        // 48h mismo continente, 72h diferente continente
-        // Ajuste dinámico del tiempo de recojo basado en la distancia
-        double base = regionDe(hub).equals(regionDe(dest)) ? 48.0 : 72.0;
-        
-        // Reducir menos tiempo para rutas intercontinentales
-        double recojoHoras = regionDe(hub).equals(regionDe(dest)) ? 2.0 : 1.0;
-        
-        return Math.max(0, base - recojoHoras);
+    // =====================================
+    // API pública usada por tu orquestador
+    // =====================================
+
+    /** Plan inicial completo (proxy a planificarPedidos con toda la lista). */
+    public List<Asignacion> planificarInicial(List<Pedido> pedidos, GrafoVuelos grafo, ParametrosAco p) {
+        return planificarPedidos(pedidos, grafo, p);
     }
 
-    // Construcción de ruta por una hormiga
-    private static Ruta construirRuta(String hub, String destino,
-                                      GrafoVuelos grafo,
-                                      double[] tau, double[] heuristica,
-                                      int pasosMax, double presupuestoHoras,
-                                      Map<Integer,Integer> capacidadRestante,
-                                      Map<String,Aeropuerto> aeropuertos,
-                                      Map<Integer,Vuelo> vuelosPorId,
-                                      int diaInicio, int horaInicio, int minutoInicio,
-                                      Random rnd) {
-        Set<String> visitados = new HashSet<>();
-        visitados.add(hub);
-        String actual = hub;
-        double horas = 0.0;
-        Ruta ruta = new Ruta();
-        ruta.nodos.add(hub);
+    /**
+     * Planificación de un subconjunto de pedidos (modo incremental).
+     * Reutiliza feromonas existentes y potencia con semillas si las hubiera.
+     */
+    public List<Asignacion> planificarPedidos(List<Pedido> pedidosSubset, GrafoVuelos grafo, ParametrosAco p) {
+        if (pedidosSubset == null || pedidosSubset.isEmpty()) return List.of();
 
-        for (int s = 0; s < pasosMax && horas <= presupuestoHoras; s++) {
-            if (actual.equals(destino)) break;
+        // 0) Inicialización de feromonas (si es primera vez, valor base)
+        inicializarFeromonasSiFalta(grafo, p);
 
-            var aristas = grafo.aristasDesde(actual);
-            if (aristas.isEmpty()) break;
+        // 1) Ejecuta ACO sobre el subset
+        Solucion mejor = ejecutarAco(pedidosSubset, grafo, p);
 
-            List<GrafoVuelos.Arista> candidatos = new ArrayList<>();
-            List<Double> pesos = new ArrayList<>();
+        // 2) Devuelve asignaciones listas
+        return mejor.asignaciones;
+    }
 
-            for (var e : aristas) {
-                String nextIata = e.b;
-                Aeropuerto next = aeropuertos.get(nextIata);
+    // =====================================
+    // Implementación de semillas (opcional)
+    // =====================================
 
-                if (next == null) continue;
+    @Override
+    public void cargarSemillasPorVueloId(Map<Integer, Double> semillasPorVueloId) {
+        this.semillasPorVueloId = (semillasPorVueloId != null) ? new HashMap<>(semillasPorVueloId)
+                                                               : new HashMap<>();
+    }
 
-                // Solo filtra capacidad de almacén si es el destino final
-                if (nextIata.equals(destino) && next.capacidad > 0 && next.cargaEntrante >= next.capacidad) continue;
+    @Override
+    public void cargarSemillasPorLlave(Map<String, Double> semillasPorLlave) {
+        this.semillasPorLlave = (semillasPorLlave != null) ? new HashMap<>(semillasPorLlave)
+                                                           : new HashMap<>();
+    }
 
-                Integer cap = capacidadRestante.get(e.vueloId);
-                if (cap == null || cap <= 0) continue;
+    // ======================
+    // Núcleo sencillo de ACO
+    // ======================
 
-                if (visitados.contains(nextIata)) continue;
+    private static final class Solucion {
+        List<Asignacion> asignaciones = new ArrayList<>();
+        double costo = Double.POSITIVE_INFINITY;
+    }
 
-                // Obtener vuelo del mapa
-                Vuelo vuelo = vuelosPorId.get(e.vueloId);
-                if (vuelo == null) continue;
+    private static final class Ant {
+        List<Asignacion> parcial = new ArrayList<>();
+        double costo = 0.0;
+    }
 
-                // Check if this flight's time is compatible with current total hours
-                // Convert horas to day, hour, minute
-                int diasTranscurridos = (int)(horas / 24.0);
-                int horasDelDia = (int)(horas % 24.0);
-                int minutosDelDia = (int)((horas * 60.0) % 60.0);
+    private Solucion ejecutarAco(List<Pedido> pedidos, GrafoVuelos grafo, ParametrosAco p) {
+        Solucion mejor = new Solucion();
+        int numHormigas = Math.max(1, p.getNumAnts());
+        int maxIter = Math.max(1, p.getMaxIter());
 
-                // Calculate actual departure time considering initial time
-                int diaActual = (diaInicio + diasTranscurridos - 1) % 31 + 1; // Wrap around to next month if needed
-                if (diaActual < diaInicio) continue; // No permitir días anteriores al inicio
-                
-                // Calculate if this flight's departure time works with our current time
-                int tiempoActualEnMinutos = horasDelDia * 60 + minutosDelDia;
-                if (vuelo.salidaMin < tiempoActualEnMinutos) {
-                    // Need to wait for tomorrow's flight
-                    if (diaActual + 1 > 31) continue; // Would be past end of month
-                    diasTranscurridos++;
-                    tiempoActualEnMinutos = vuelo.salidaMin;
+        for (int iter = 0; iter < maxIter; iter++) {
+            List<Ant> colonia = new ArrayList<>(numHormigas);
+
+            for (int k = 0; k < numHormigas; k++) {
+                Ant ant = construirSolucion(pedidos, grafo, p);
+                colonia.add(ant);
+                if (ant.costo < mejor.costo) {
+                    mejor.costo = ant.costo;
+                    mejor.asignaciones = ant.parcial;
                 }
-
-                // Score ACO (puedes ajustar alpha/beta aquí si lo deseas)
-                double tauVal = tau[e.vueloId];
-                double heurVal = heuristica[e.vueloId];
-                double eps = 1e-9;
-                double alpha = 1.0, beta = 2.0; // puedes parametrizar
-                double score = Math.pow(Math.max(tauVal, eps), alpha) * Math.pow(Math.max(heurVal, eps), beta);
-                candidatos.add(e);
-                pesos.add(score);
             }
 
+            // Actualización de feromonas (evaporación + refuerzo por mejores soluciones)
+            evaporar(p);
+            reforzar(colonia, p);
+        }
+
+        // Si no se encontró nada viable, regresa lista vacía: el orquestador marcará “riesgo/colapso”.
+        return mejor;
+    }
+
+    /** Construcción greedy-probabilística de soluciones para cada hormiga. */
+    private Ant construirSolucion(List<Pedido> pedidos, GrafoVuelos grafo, ParametrosAco p) {
+        Ant ant = new Ant();
+
+        // Puedes ordenar por vencimiento SLA, prioridad, o mantener orden de entrada:
+        List<Pedido> orden = new ArrayList<>(pedidos);
+        // TODO (si aplica): Collections.sort(orden, Comparator.comparing(Pedido::getSlaMinuto));
+
+        for (Pedido pedido : orden) {
+            Ruta ruta = construirRutaParaPedido(pedido, grafo, p);
+            if (ruta == null) {
+                // No se encontró ruta factible: opcionalmente penaliza fuerte
+                ant.costo += penalizacionNoAtendido(pedido, p);
+                // Puedes agregar Asignacion con ruta null para que el orquestador lo trate.
+                ant.parcial.add(new Asignacion(pedido, null));
+            } else {
+                ant.parcial.add(new Asignacion(pedido, ruta));
+                ant.costo += costoRuta(ruta, p);
+                // TODO: si tu simulación consume capacidad aquí, descuéntala (slots, peso, etc.)
+            }
+        }
+
+        return ant;
+    }
+
+    /**
+     * Búsqueda de ruta para un pedido usando transición ACO (tau^alpha * eta^beta * biasSemilla).
+     * Aquí es donde el bias de semillas hace que el ACO “prefiera” subrutas previas exitosas.
+     */
+    private Ruta construirRutaParaPedido(Pedido pedido, GrafoVuelos grafo, ParametrosAco p) {
+        // Este método depende de tu representación:
+        // Suponemos que construyes la ruta como una secuencia de vueloId desde un origen (hub o actual) hasta destino pedido.dest
+        // respetando ventana de tiempo, conexiones y SLA.
+
+        // TODO: punto de partida real según tu modelo (¿hub?, ¿origen del pedido?):
+        String nodoActual = /* p. ej. hub */ pedido.getNodoOrigen(); // ajusta si corresponde
+        int tiempoActual = pedido.getMinutoDisponible();             // desde cuándo puede salir
+
+        List<Integer> vuelosUsados = new ArrayList<>();
+        int guardLimit = 200; // evita ciclos infinitos
+
+        while (!nodoActual.equals(pedido.getNodoDestino()) && guardLimit-- > 0) {
+            // 1) Obtener candidatos (vuelos) desde nodoActual que respeten horarios/capacidad:
+            List<Integer> candidatos = obtenerVuelosFactibles(nodoActual, tiempoActual, pedido, grafo, p);
             if (candidatos.isEmpty()) break;
 
-            // Ruleta proporcional
-            double suma = pesos.stream().mapToDouble(d -> d).sum();
-            double r = rnd.nextDouble() * (suma <= 0 ? 1.0 : suma);
-            double acc = 0.0;
-            int idx = candidatos.size() - 1; // por defecto el último
+            // 2) Calcular probas con ACO:
+            double[] prob = new double[candidatos.size()];
+            double suma = 0.0;
+
             for (int i = 0; i < candidatos.size(); i++) {
-                acc += (suma <= 0 ? (1.0 / candidatos.size()) : pesos.get(i));
-                if (r <= acc) {
-                    idx = i;
+                int vueloId = candidatos.get(i);
+
+                double tau_ij = tau.getOrDefault(vueloId, p.getTau0());
+                double eta_ij = heuristica(vueloId, pedido, grafo, p); // 1/distancia, slack, etc.
+                double bias = biasSemilla(vueloId, grafo, p);          // semillas (si hay)
+
+                double val = Math.pow(tau_ij, p.getAlpha()) * Math.pow(eta_ij, p.getBeta()) * bias;
+                prob[i] = val;
+                suma += val;
+            }
+
+            int selIdx;
+            if (rng.nextDouble() < p.getQ0() && suma > 0) {
+                // Exploit: escoger el máximo
+                selIdx = argmax(prob);
+            } else {
+                // Explore: ruleta
+                selIdx = ruleta(prob, suma);
+                if (selIdx < 0) {
+                    // Sin suma positiva; romper:
                     break;
                 }
             }
-            var elegido = candidatos.get(idx);
 
-            // Registrar tramo en itinerario
-            ruta.vuelosUsados.add(elegido.vueloId);
-            ruta.itinerario.add(elegido.a + "->" + elegido.b + String.format(java.util.Locale.US, " (%.1fh)", elegido.horas));
-            horas += elegido.horas;
-            actual = elegido.b;
-            ruta.nodos.add(actual);
-            visitados.add(actual);
-            if (actual.equals(destino)) break;
+            int elegido = candidatos.get(selIdx);
+            vuelosUsados.add(elegido);
+
+            // 3) Avanzar estado (nodoActual, tiempoActual):
+            // TODO: utiliza tus getters del grafo para conocer destino del vuelo, hora de llegada, etc.
+            String siguienteNodo = grafo.destinoDe(elegido);
+            int llegadaMin = grafo.llegadaMinDe(elegido); // incluye duración + esperas si aplica
+
+            nodoActual = siguienteNodo;
+            tiempoActual = llegadaMin;
+
+            // 4) Criterios de parada extra: si excede SLA, aborta
+            if (!cumpleSlaParcial(pedido, tiempoActual, p)) {
+                return null;
+            }
+
+            // 5) Si alcanzó destino, arma ruta
+            if (nodoActual.equals(pedido.getNodoDestino())) {
+                return construirRutaDesdeListaVuelos(vuelosUsados, grafo);
+            }
         }
 
-        // Valida contra presupuesto (SLA-2h)
-        if (!actual.equals(destino) || horas > presupuestoHoras) return null;
-        ruta.horasTotales = horas;
-        return ruta;
+        // No se alcanzó el destino:
+        return null;
     }
 
-    // Planificación por ACO
-    public static List<Asignacion> planificarConAco(
-            Map<String,Aeropuerto> aeropuertos,
-            List<Vuelo> vuelos,
-            List<Pedido> pedidos,
-            ParametrosAco p,
-            long semillaAleatoria
-    ) {
-        // Cargar regiones por IATA desde los aeropuertos
-        REGION_BY_IATA.clear();
-        for (Aeropuerto ap : aeropuertos.values()) {
-            if (ap.continente != null && !ap.continente.isBlank()) {
-                REGION_BY_IATA.put(ap.codigo, ap.continente);
-            }
-        }
+    // ==========================
+    // Helpers de transición ACO
+    // ==========================
 
-        // Crear mapa de vuelos por ID para acceso rápido
-        Map<Integer, Vuelo> vuelosPorId = new HashMap<>();
-        for (Vuelo v : vuelos) {
-            vuelosPorId.put(v.id, v);
-        }
+    private double biasSemilla(int vueloId, GrafoVuelos grafo, ParametrosAco p) {
+        // Multiplicador suave: 1 + k * normalizedSeed
+        // Para mantener estabilidad, acotamos en [1, 1 + kMax]
+        double k = 1.0; // puedes exponerlo en ParametrosAco si prefieres
+        double semId = semillasPorVueloId.getOrDefault(vueloId, 0.0);
+        String llave = grafo.llaveDe(vueloId);
+        double semLlave = (llave != null) ? semillasPorLlave.getOrDefault(llave, 0.0) : 0.0;
 
-        GrafoVuelos grafo = new GrafoVuelos(vuelos);
-        double[] tau = new double[vuelos.size()];
-        double[] heur = new double[vuelos.size()];
-        Arrays.fill(tau, 0.1);
+        // Combina (suma) y normaliza suavemente:
+        double s = semId + semLlave;   // si no tienes llaves, semLlave será 0
+        if (s <= 0) return 1.0;
 
-        // Calcular heurística usando distancia real (Haversine) y duración en horas
-        for (Vuelo v : vuelos) {
-            Aeropuerto a1 = aeropuertos.get(v.origen);
-            Aeropuerto a2 = aeropuertos.get(v.destino);
-            double heurVal = 1e-6;
-            if (a1 == null || a2 == null) {
-                heur[v.id] = heurVal;
-                continue;
-            }
-            double dist = UtilArchivos.distanciaKm(a1, a2);
-            double durHoras = v.horasDuracion;
-            if (dist <= 0 || Double.isInfinite(dist) || Double.isNaN(dist)) dist = 1e6;
-            // Favorecer vuelos con más capacidad disponible
-            double capacityBonus = v.capacidad / 100.0; // bonus por capacidad
-            heurVal = (1.0 + capacityBonus) / (dist/1000.0 + durHoras + 1.0);
-            heur[v.id] = heurVal;
-        }
-
-        Map<Integer,Integer> capRest = new HashMap<>();
-        for (Vuelo v : vuelos) capRest.put(v.id, v.capacidad);
-
-        Random rnd = new Random(semillaAleatoria);
-        List<Asignacion> resultado = new ArrayList<>();
-        
-        for (Pedido ped : pedidos) {
-            String hub = hubParaDestino(ped.destinoIata);
-            double presupuesto = slaHoras(hub, ped.destinoIata);
-            Ruta mejor = null;
-
-            for (int it=0; it<p.iteraciones; it++) {
-                Ruta mejorIter = null;
-                for (int h=0; h<p.hormigas; h++) {
-                    Ruta r = construirRuta(hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto, capRest, aeropuertos, 
-                        vuelosPorId, ped.dia, ped.hora, ped.minuto, rnd);
-                    if (r != null && (mejorIter==null || r.horasTotales < mejorIter.horasTotales)) mejorIter = r;
-                }
-                // evaporación
-                for (int i=0;i<tau.length;i++) tau[i] *= (1.0 - p.rho);
-                // refuerzo
-                if (mejorIter != null) {
-                    double dep = p.Q / (1.0 + mejorIter.horasTotales);
-                    for (int fid : mejorIter.vuelosUsados) tau[fid] += dep;
-                    if (mejor == null || mejorIter.horasTotales < mejor.horasTotales) mejor = mejorIter;
-                }
-            }
-
-            int paquetesRestantes = ped.paquetes;
-            List<Ruta> rutasUsadas = new ArrayList<>();
-            List<Integer> paquetesPorRuta = new ArrayList<>();
-            
-            // Permitir hasta 3 rutas alternativas por pedido
-            int intentosRuta = 0;
-            while (paquetesRestantes > 0 && mejor != null && intentosRuta < 3) {
-                intentosRuta++;
-                Asignacion asg = new Asignacion();
-                asg.pedido = ped;
-                asg.hubOrigen = hub;
-                asg.ruta = mejor;
-                asg.paquetesAsignados = 0;
-                asg.paquetesPendientes = paquetesRestantes;
-
-                // cuello de botella: vuelos + almacén destino
-                int cuelloVuelo = Integer.MAX_VALUE;
-                for (int fid : mejor.vuelosUsados) {
-                    cuelloVuelo = Math.min(cuelloVuelo, capRest.getOrDefault(fid, 0));
-                }
-                
-
-                Aeropuerto apDest = aeropuertos.get(ped.destinoIata);
-                int remAlmacen = apDest != null ? apDest.capacidad : 0;
-                if (apDest != null) {
-                    // Calcular minuto de llegada absoluta
-                    int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
-                    for (int m = minutoLlegada; m < minutoLlegada + 120; m++) { // 2 horas = 120 minutos
-                        int ocup = apDest.ocupacionPorMinuto.getOrDefault(m, 0);
-                        remAlmacen = Math.min(remAlmacen, apDest.capacidad - ocup);
-                    }
-                }
-
-                int asignable = Math.max(0, Math.min(paquetesRestantes, Math.min(cuelloVuelo, remAlmacen)));
-
-                if (asignable > 0) {
-                    for (int fid : mejor.vuelosUsados) {
-                        capRest.put(fid, capRest.get(fid) - asignable);
-                    }
-                    if (apDest != null) {
-                        int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
-                        for (int m = minutoLlegada; m < minutoLlegada + 120; m++) {
-                            apDest.ocupacionPorMinuto.put(m, apDest.ocupacionPorMinuto.getOrDefault(m, 0) + asignable);
-                        }
-                    }
-                    asg.paquetesAsignados = asignable;
-                    asg.paquetesPendientes = paquetesRestantes - asignable;
-                    paquetesRestantes -= asignable;
-                    rutasUsadas.add(mejor);
-                    paquetesPorRuta.add(asignable);
-                }
-                
-                resultado.add(asg);
-                
-                // Si quedan paquetes, intentar encontrar otra ruta
-                if (paquetesRestantes > 0) {
-                    mejor = null;
-                    double mejorHoras = Double.POSITIVE_INFINITY;
-                    
-                    // Búsqueda de ruta alternativa con parámetros moderados
-                    for (int it=0; it<5; it++) {  // 5 iteraciones para rutas adicionales
-                        for (int h=0; h<15; h++) {  // 15 hormigas para rutas adicionales
-                            Ruta r = construirRuta(hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto, 
-                                capRest, aeropuertos, vuelosPorId, ped.dia, ped.hora, ped.minuto, rnd);
-                            if (r != null && r.horasTotales < mejorHoras) {
-                                mejor = r;
-                                mejorHoras = r.horasTotales;
-                            }
-                        }
-                    }
-                    
-                    // Si después de algunos intentos no encontramos ruta, abandonar
-                    if (mejorHoras == Double.POSITIVE_INFINITY) break;
-                    
-                    // Si no encontramos una ruta alternativa, salimos del bucle
-                    if (mejor == null) break;
-                }
-            }
-        }
-        return resultado;
+        // Normalización simple por capeo:
+        double norm = Math.min(s, 5.0); // evitar blow-up; 5 es un tope razonable
+        return 1.0 + k * (norm / 5.0);  // en [1, 2] aprox.
     }
 
+    private int argmax(double[] v) {
+        int idx = 0;
+        double best = v[0];
+        for (int i = 1; i < v.length; i++) {
+            if (v[i] > best) { best = v[i]; idx = i; }
+        }
+        return idx;
+    }
+
+    private int ruleta(double[] prob, double suma) {
+        if (suma <= 0) return -1;
+        double r = rng.nextDouble() * suma;
+        double acc = 0.0;
+        for (int i = 0; i < prob.length; i++) {
+            acc += prob[i];
+            if (r <= acc) return i;
+        }
+        return prob.length - 1;
+    }
+
+    private void evaporar(ParametrosAco p) {
+        double rho = p.getRho();
+        for (Map.Entry<Integer, Double> e : tau.entrySet()) {
+            tau.put(e.getKey(), (1.0 - rho) * e.getValue());
+        }
+    }
+
+    private void reforzar(List<Ant> colonia, ParametrosAco p) {
+        // Refuerzo tipo "elitista": usa la mejor hormiga de la iteración
+        Ant best = null;
+        for (Ant a : colonia) {
+            if (best == null || a.costo < best.costo) best = a;
+        }
+        if (best == null) return;
+
+        // Deposita feromona proporcional a 1/costo en los vuelos usados de sus rutas:
+        double delta = (best.costo > 0) ? (1.0 / best.costo) : 1.0;
+
+        for (Asignacion asg : best.parcial) {
+            if (asg == null || asg.ruta == null || asg.ruta.vuelosUsados == null) continue;
+            for (Integer vueloId : asg.ruta.vuelosUsados) {
+                tau.merge(vueloId, delta, Double::sum);
+            }
+        }
+    }
+
+    private void inicializarFeromonasSiFalta(GrafoVuelos grafo, ParametrosAco p) {
+        // Si tu grafo expone el universo de vueloIds, inicialízalos con tau0:
+        double tau0 = p.getTau0();
+        for (Integer vueloId : grafo.todosLosVueloIds()) { // TODO: expón este método en tu grafo
+            tau.putIfAbsent(vueloId, tau0);
+        }
+    }
+
+    // ==============================
+    // Heurística y validadores base
+    // ==============================
+
+    /** Heurística por arista (vuelo): ↑ si acerca al destino, si es rápido y con holgura SLA. */
+    private double heuristica(int vueloId, Pedido pedido, GrafoVuelos grafo, ParametrosAco p) {
+        // Ejemplo: 1 / (duración + penalización distancia al destino)
+        int durMin = grafo.duracionMinDe(vueloId); // TODO
+        double distH = grafo.heuristicaRestante(grafo.destinoDe(vueloId), pedido.getNodoDestino()); // TODO (0 si no tienes)
+        double val = 1.0 / (1.0 + durMin + distH);
+        return Math.max(val, 1e-6);
+    }
+
+    private boolean cumpleSlaParcial(Pedido pedido, int llegadaMinAcumulada, ParametrosAco p) {
+        // TODO: valida con tu política de SLA (deadline en minutos, hops máximos, etc.)
+        return true;
+    }
+
+    private double penalizacionNoAtendido(Pedido pedido, ParametrosAco p) {
+        // TODO: si tienes criticidad/peso del pedido, úsalo aquí.
+        return 1e6;
+    }
+
+    private double costoRuta(Ruta r, ParametrosAco p) {
+        // TODO: combina duración total, hops, penalizaciones por cercanía al SLA, distancia km, etc.
+        return r.costoTotal; // si ya lo calculas; si no, haz tu fórmula
+    }
+
+    private Ruta construirRutaDesdeListaVuelos(List<Integer> vuelosUsados, GrafoVuelos grafo) {
+        Ruta r = new Ruta();
+        r.vuelosUsados = new ArrayList<>(vuelosUsados);
+        // TODO: si en tu clase Ruta calculas tiempos/distancia/costo, invoca aquí el recálculo:
+        // r.recalcular(grafo);
+        return r;
+    }
+
+    /**
+     * Devuelve ids de vuelos saliendo de nodoActual que:
+     * - No estén cancelados,
+     * - Cumplan con hora salida >= tiempoActual (con espera razonable),
+     * - Respeten restricciones de capacidad/peso si aplica,
+     * - No violen ventanas/SLA intermedio.
+     */
+    private List<Integer> obtenerVuelosFactibles(String nodoActual, int tiempoActual, Pedido pedido,
+                                                 GrafoVuelos grafo, ParametrosAco p) {
+        List<Integer> out = new ArrayList<>();
+        for (int vueloId : grafo.vuelosDesde(nodoActual)) { // TODO: expón vuelosDesde(nodo) -> List<Integer>
+            String llave = grafo.llaveDe(vueloId);
+            if (llave != null && grafo.estaCancelado(llave)) continue;
+
+            int salidaMin = grafo.salidaMinDe(vueloId);       // TODO
+            if (salidaMin < tiempoActual) continue;           // ya partió (o no alcanzas la conexión)
+
+            // TODO: validaciones adicionales (capacidad, ventanas del pedido, etc.)
+            out.add(vueloId);
+        }
+        return out;
+    }
 }

@@ -9,6 +9,10 @@ public class Vuelo {
     public int capacidad;         // mutable: se consume al asignar
     public final double horasDuracion;
     public boolean esContinental; // Nuevo campo para indicar si el vuelo es continental
+    public boolean cancelado = false;
+    
+    public String llave() { return origen + ">" + destino + "@" + salidaMin; }
+
 
     public Vuelo(int id, String origen, String destino, int salidaMin, int llegadaMin, 
         int capacidad, int duracion, boolean esContinental) {
