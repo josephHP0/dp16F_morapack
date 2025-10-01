@@ -21,7 +21,7 @@ public class SistemaReactivoPlanificacion {
     public SistemaReactivoPlanificacion(Map<String, Aeropuerto> aeropuertos, 
                                        List<Vuelo> vuelos,
                                        ParametrosAco parametros) {
-        this.reloj = new RelojSimulacion(1, 0, 60); // Día 1, 00:00, 1 hora virtual por segundo
+        this.reloj = new RelojSimulacion(1, 0, 360); // Día 1, 00:00, 1 hora virtual por segundo
         this.gestorEstados = new GestorEstadoVuelos(reloj);
         this.parametros = parametros;
         this.pedidosPendientes = new ConcurrentLinkedQueue<>();

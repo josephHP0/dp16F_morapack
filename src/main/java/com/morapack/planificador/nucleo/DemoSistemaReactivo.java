@@ -26,13 +26,13 @@ public class DemoSistemaReactivo {
             List<Vuelo> vuelos = UtilArchivos.cargarVuelos(
                 Paths.get("data/vuelos.txt"), aeropuertos);
             List<Pedido> pedidos = UtilArchivos.cargarPedidos(
-                Paths.get("data/pedidos_2.txt"), aeropuertos.keySet());
+                Paths.get("data/pedidos_3.txt"), aeropuertos.keySet());
             
             System.out.println("📦 Datos REALES cargados:");
             System.out.println("   • Aeropuertos: " + aeropuertos.size());
             System.out.println("   • Vuelos diarios: " + vuelos.size()); 
             System.out.println("   • Vuelos mensuales: " + (vuelos.size() * 31) + " (repetidos 31 días)");
-            System.out.println("   • Pedidos (pedidos_2.txt): " + pedidos.size());
+            System.out.println("   • Pedidos (pedidos_3.txt): " + pedidos.size());
             
             // 2. Crear parámetros optimizados para reactividad
             ParametrosAco parametros = new ParametrosAco();
@@ -46,6 +46,8 @@ public class DemoSistemaReactivo {
             SistemaReactivoPlanificacion sistema = new SistemaReactivoPlanificacion(
                 aeropuertos, vuelos, parametros);
             
+            
+
             // 4. Configurar simulación de cancelaciones
             if (java.nio.file.Files.exists(Paths.get("data/cancelaciones_vuelos.txt"))) {
                 sistema.cargarCancelaciones(Paths.get("data/cancelaciones_vuelos.txt"));
