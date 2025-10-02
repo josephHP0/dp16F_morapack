@@ -71,7 +71,7 @@ public class AppPlanificador {
 
         Path aeropuertosPath = Paths.get(arg.getOrDefault("aeropuertos", "data/aeropuertos.txt"));
         Path vuelosPath      = Paths.get(arg.getOrDefault("vuelos", "data/vuelos.txt"));
-        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos_1.txt"));
+        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos2.txt"));
         Path cancelacionesPath = Paths.get(arg.getOrDefault("cancelaciones", "data/cancelaciones.txt"));
         Path salidaPath      = Paths.get(arg.getOrDefault("salida", "plan_asignacion.csv"));
 
@@ -105,7 +105,7 @@ public class AppPlanificador {
         System.out.println("[SIMULACIÓN MENSUAL COMPLETA] Inicio=" + diaInicio + " días=" + dias);
         
         // ANÁLISIS PREVIO COMPLETO DEL SISTEMA
-        System.out.println("\n=== 🔍 ANÁLISIS PREVIO DEL SISTEMA ===");
+        System.out.println("\n=== ANÁLISIS PREVIO DEL SISTEMA ===");
         AnalisisAlgoritmo.analizarConfiguracionACO(p);
         AnalisisAlgoritmo.analizarDistribucionPedidos(pedidos);
         AnalisisAlgoritmo.analizarConectividad(aeropuertos, vuelos);
@@ -114,10 +114,10 @@ public class AppPlanificador {
         ParametrosAco recomendado = AnalisisAlgoritmo.recomendarParametrosOptimos(
             pedidos.size(), aeropuertos.size());
         
-        System.out.println("\n🔄 APLICANDO PARÁMETROS OPTIMIZADOS AUTOMÁTICAMENTE...");
+        System.out.println("\n>> APLICANDO PARÁMETROS OPTIMIZADOS AUTOMÁTICAMENTE...");
         p = recomendado;
         
-        System.out.println("⚡ PARÁMETROS FINALES: " + p.hormigas + " hormigas × " + p.iteraciones + " iteraciones = " + (p.hormigas * p.iteraciones) + " ejecuciones");
+        System.out.println(">> PARÁMETROS FINALES: " + p.hormigas + " hormigas × " + p.iteraciones + " iteraciones = " + (p.hormigas * p.iteraciones) + " ejecuciones");
         if (!Files.exists(cancelacionesPath)) {
             System.out.println("ADVERTENCIA: No existe el archivo de cancelaciones en " + cancelacionesPath.toAbsolutePath());
             System.out.println("Se simulará SIN cancelaciones.");
@@ -174,7 +174,7 @@ public class AppPlanificador {
      */
     private static void diagnosticarPaquetesPendientes(List<Asignacion> plan, List<Pedido> pedidos, 
                                                      Map<String, Aeropuerto> aeropuertos, List<Vuelo> vuelos) {
-        System.out.println("\n=== 🔍 DIAGNÓSTICO DE PAQUETES PENDIENTES ===");
+        System.out.println("\n=== DIAGNÓSTICO DE PAQUETES PENDIENTES ===");
         
         // Identificar pedidos sin asignación completa
         Map<String, Integer> paquetesPorPedido = new HashMap<>();
@@ -205,7 +205,7 @@ public class AppPlanificador {
         System.out.println("Total paquetes pendientes: " + totalPendientes);
         
         if (!pedidosPendientes.isEmpty()) {
-            System.out.println("\n🔍 Analizando primeros 10 pedidos problemáticos:");
+            System.out.println("\n>> Analizando primeros 10 pedidos problemáticos:");
             
             for (int i = 0; i < Math.min(10, pedidosPendientes.size()); i++) {
                 String pedidoId = pedidosPendientes.get(i);
@@ -232,7 +232,7 @@ public class AppPlanificador {
                             .filter(v -> v.destino.equals(pedido.destinoIata))
                             .count();
                     
-                    System.out.printf("     ✈️  Vuelos hacia %s: %d disponibles%n", pedido.destinoIata, vuelosAlDestino);
+                    System.out.printf("     >> Vuelos hacia %s: %d disponibles%n", pedido.destinoIata, vuelosAlDestino);
                     
                     if (vuelosAlDestino == 0) {
                         System.out.println("     ❌ PROBLEMA: No hay vuelos hacia este destino");
@@ -251,7 +251,7 @@ public class AppPlanificador {
         }
         
         // Estadísticas generales de conectividad
-        System.out.println("\n📊 ESTADÍSTICAS DE RED:");
+        System.out.println("\n>> ESTADÍSTICAS DE RED:");
         
         Set<String> destinosConVuelos = vuelos.stream().map(v -> v.destino).collect(Collectors.toSet());
         Set<String> destinosPedidos = pedidos.stream().map(p -> p.destinoIata).collect(Collectors.toSet());
@@ -273,28 +273,28 @@ public class AppPlanificador {
         System.out.println("  🏪 Almacenes saturados: " + almacenesSaturados + "/" + aeropuertos.size());
         
         // Recomendar mejoras
-        System.out.println("\n💡 RECOMENDACIONES:");
+        System.out.println("\n>> RECOMENDACIONES:");
         
         if (destinosSinVuelos.size() > 0) {
-            System.out.println("  ✅ Agregar más vuelos hacia: " + destinosSinVuelos);
+            System.out.println("  >> Agregar más vuelos hacia: " + destinosSinVuelos);
         }
         
         if (almacenesSaturados > 0) {
-            System.out.println("  ✅ Aumentar capacidad de almacén en aeropuertos saturados");
+            System.out.println("  >> Aumentar capacidad de almacén en aeropuertos saturados");
         }
         
         double totalPaquetesSolicitados = pedidos.stream().mapToInt(p -> p.paquetes).sum();
         double porcentajePendiente = totalPaquetesSolicitados > 0 ? (totalPendientes * 100.0 / totalPaquetesSolicitados) : 0;
         
         if (porcentajePendiente > 20) {
-            System.out.println("  ✅ Considerar aumentar parámetros ACO (más hormigas/iteraciones)");
+            System.out.println("  >> Considerar aumentar parámetros ACO (más hormigas/iteraciones)");
         }
         
         if (porcentajePendiente > 10) {
-            System.out.println("  ✅ Revisar restricciones temporales de pedidos");
+            System.out.println("  >> Revisar restricciones temporales de pedidos");
         }
         
-        System.out.printf("📊 Resumen: %.1f%% paquetes pendientes%n", porcentajePendiente);
+        System.out.printf(">> Resumen: %.1f%% paquetes pendientes%n", porcentajePendiente);
     }
     
     /**
@@ -312,14 +312,14 @@ public class AppPlanificador {
             long semilla
     ) throws Exception {
 
-        System.out.println("\\n🔄 === INICIANDO SIMULACIÓN REACTIVA CON MONITOREO DETALLADO ===");
-        System.out.printf("📅 Período: %d días (del %d al %d)%n", numeroDias, diaInicio, diaInicio + numeroDias - 1);
+        System.out.println("\\n=== INICIANDO SIMULACIÓN REACTIVA CON MONITOREO DETALLADO ===");
+        System.out.printf(">> Período: %d días (del %d al %d)%n", numeroDias, diaInicio, diaInicio + numeroDias - 1);
         
         // Cargar cancelaciones
         List<PlanificadorAco.Cancelacion> cancels = PlanificadorAco.cargarCancelaciones(archivoCancelaciones);
         Map<Integer, Set<Integer>> cancelByDay = PlanificadorAco.mapearCancelacionesAIdsPorDia(vuelos, cancels);
         
-        System.out.printf("🚫 Total cancelaciones cargadas: %d eventos%n", cancels.size());
+        System.out.printf(">> Total cancelaciones cargadas: %d eventos%n", cancels.size());
         mostrarResumenCancelacionesDetallado(cancels, diaInicio, numeroDias);
         
         List<Asignacion> consolidado = new ArrayList<>();
@@ -337,7 +337,7 @@ public class AppPlanificador {
             int diaSim = diaInicio + d;
             if (diaSim > 31) break;
             
-            System.out.printf("%n📅 === DÍA %02d ====%n", diaSim);
+            System.out.printf("%n=== DÍA %02d ====%n", diaSim);
             long inicioTiempo = System.currentTimeMillis();
             
             // Analizar cancelaciones del día
@@ -353,16 +353,16 @@ public class AppPlanificador {
             }
             
             int paquetesDelDia = pedidosDelDia.stream().mapToInt(p -> p.paquetes).sum();
-            System.out.printf("📦 Pedidos del día: %d pedidos, %d paquetes%n", 
+            System.out.printf(">> Pedidos del día: %d pedidos, %d paquetes%n", 
                              pedidosDelDia.size(), paquetesDelDia);
             
             if (pedidosDelDia.isEmpty()) {
-                System.out.println("   ⏭️  Sin pedidos para procesar, continuando...");
+                System.out.println("   >> Sin pedidos para procesar, continuando...");
                 continue;
             }
 
             // === GESTIÓN TEMPORAL REALISTA ===
-            System.out.println("🔄 Actualizando estados temporales...");
+            System.out.println(">> Actualizando estados temporales...");
             
             // PASO 1: Procesar recogida de paquetes (después de 2 horas)
             actualizarEstadoAlmacenes(aeropuertos, diaSim, 0);
@@ -382,7 +382,7 @@ public class AppPlanificador {
                 cancelSoloHoy.put(diaSim, cancelByDay.get(diaSim));
             }
             
-            System.out.println("🔄 Ejecutando planificación ACO reactiva...");
+            System.out.println(">> Ejecutando planificación ACO reactiva...");
             
             List<Asignacion> planDelDia = PlanificadorAco.planificarConAco(
                     aeropuertos,
@@ -404,9 +404,9 @@ public class AppPlanificador {
                     .distinct()
                     .count();
             
-            System.out.printf("📊 Resultados: %d/%d paquetes asignados (%.1f%%)%n", 
+            System.out.printf(">> Resultados: %d/%d paquetes asignados (%.1f%%)%n", 
                              paquetesAsignados, paquetesDelDia, eficiencia);
-            System.out.printf("📈 Pedidos: %d/%d con asignación (%.1f%%)%n", 
+            System.out.printf(">> Pedidos: %d/%d con asignación (%.1f%%)%n", 
                              pedidosConAsignacion, pedidosDelDia.size(), 
                              (pedidosConAsignacion * 100.0 / pedidosDelDia.size()));
             
@@ -424,14 +424,14 @@ public class AppPlanificador {
             double tiempoEjecucion = (finTiempo - inicioTiempo) / 1000.0;
             
             // Mostrar resumen del día
-            String emoji = eficiencia >= 90 ? "🟢" : eficiencia >= 70 ? "🟡" : "🔴";
+            String prefijo = eficiencia >= 90 ? "+++" : eficiencia >= 70 ? "+ +" : ">> ";
             String estado = cancelacionesDia.isEmpty() ? "Operación normal" : "Cancelaciones activas";
             
             System.out.printf("%s Día %02d completado en %.1fs - Eficiencia: %.1f%% (%s)%n", 
-                             emoji, diaSim, tiempoEjecucion, eficiencia, estado);
+                             prefijo, diaSim, tiempoEjecucion, eficiencia, estado);
             
             if (!cancelacionesDia.isEmpty()) {
-                System.out.printf("   🚫 %d cancelaciones procesadas%n", cancelacionesDia.size());
+                System.out.printf("   >> %d cancelaciones procesadas%n", cancelacionesDia.size());
             }
             
             System.out.println("   ─────────────────────────────────────────");
@@ -452,11 +452,11 @@ public class AppPlanificador {
             List<PlanificadorAco.Cancelacion> cancelsDia = cancelsPorDia.getOrDefault(dia, Collections.emptyList());
             
             if (!cancelsDia.isEmpty()) {
-                System.out.printf("   📅 Día %02d: %d cancelaciones%n", dia, cancelsDia.size());
+                System.out.printf("   >> Día %02d: %d cancelaciones%n", dia, cancelsDia.size());
                 for (PlanificadorAco.Cancelacion c : cancelsDia) {
                     int horas = c.salidaMin / 60;
                     int minutos = c.salidaMin % 60;
-                    System.out.printf("      🚫 %s→%s salida %02d:%02d%n", c.origen, c.destino, horas, minutos);
+                    System.out.printf("      >> %s→%s salida %02d:%02d%n", c.origen, c.destino, horas, minutos);
                 }
             }
         }
@@ -465,11 +465,11 @@ public class AppPlanificador {
     private static void analizarCancelacionesDelDiaDetallado(int dia, Set<Integer> cancelacionesDia, List<Vuelo> vuelos) {
         
         if (cancelacionesDia.isEmpty()) {
-            System.out.println("✅ Sin cancelaciones programadas - operación normal");
+            System.out.println(">> Sin cancelaciones programadas - operación normal");
             return;
         }
         
-        System.out.printf("🚫 CANCELACIONES DETECTADAS: %d vuelos afectados%n", cancelacionesDia.size());
+        System.out.printf(">> CANCELACIONES DETECTADAS: %d vuelos afectados%n", cancelacionesDia.size());
         
         Map<Integer, Vuelo> vuelosPorId = vuelos.stream()
                 .collect(Collectors.toMap(v -> v.id, v -> v));
@@ -477,17 +477,17 @@ public class AppPlanificador {
         for (Integer vueloId : cancelacionesDia) {
             Vuelo vuelo = vuelosPorId.get(vueloId);
             if (vuelo != null) {
-                System.out.printf("   🚫 Vuelo %d: %s→%s (Capacidad: %d paquetes)%n", 
+                System.out.printf("   >> Vuelo %d: %s→%s (Capacidad: %d paquetes)%n", 
                                  vueloId, vuelo.origen, vuelo.destino, vuelo.capacidad);
             }
         }
         
-        System.out.println("   ⚠️  Sistema iniciando replanificación reactiva...");
+        System.out.println("   >> Sistema iniciando replanificación reactiva...");
     }
     
     private static void identificarImpactosCancelacionesDetallado(List<Asignacion> plan, List<Pedido> pedidos) {
         
-        System.out.println("🔍 ANALIZANDO IMPACTOS DE CANCELACIONES:");
+        System.out.println(">> ANALIZANDO IMPACTOS DE CANCELACIONES:");
         
         List<String> pedidosAfectados = new ArrayList<>();
         
@@ -506,14 +506,14 @@ public class AppPlanificador {
         }
         
         if (pedidosAfectados.isEmpty()) {
-            System.out.println("   ✅ EXCELENTE: Cancelaciones manejadas sin impactos significativos");
-            System.out.println("   🔄 Sistema reactivo funcionó perfectamente");
+            System.out.println("   >> EXCELENTE: Cancelaciones manejadas sin impactos significativos");
+            System.out.println("   >> Sistema reactivo funcionó perfectamente");
         } else {
-            System.out.printf("   ⚠️  IMPACTOS IDENTIFICADOS: %d pedidos afectados%n", pedidosAfectados.size());
+            System.out.printf("   >> IMPACTOS IDENTIFICADOS: %d pedidos afectados%n", pedidosAfectados.size());
             for (String descripcion : pedidosAfectados) {
-                System.out.printf("      📦 %s%n", descripcion);
+                System.out.printf("      >> %s%n", descripcion);
             }
-            System.out.println("   🔄 Replanificación aplicada automáticamente");
+            System.out.println("   >> Replanificación aplicada automáticamente");
         }
     }
     
@@ -534,7 +534,7 @@ public class AppPlanificador {
             estadosAeropuertos.put(codigo, new EstadoAeropuerto());
         }
         
-        System.out.printf("✅ Estados inicializados: %d vuelos, %d aeropuertos%n", 
+        System.out.printf(">> Estados inicializados: %d vuelos, %d aeropuertos%n", 
                          estadosVuelos.size(), estadosAeropuertos.size());
     }
     
@@ -569,7 +569,7 @@ public class AppPlanificador {
         }
         
         if (paquetesRecogidos > 0) {
-            System.out.printf("📤 Recogida automática: %d paquetes recogidos (%d ubicaciones liberadas)%n", 
+            System.out.printf(">> Recogida automática: %d paquetes recogidos (%d ubicaciones liberadas)%n", 
                              paquetesRecogidos, ubicacionesLiberadas);
         }
     }
@@ -612,7 +612,7 @@ public class AppPlanificador {
         }
         
         if (vuelosDescargados > 0) {
-            System.out.printf("✈️ Vuelos completados: %d vuelos descargaron %d paquetes%n", 
+            System.out.printf(">> Vuelos completados: %d vuelos descargaron %d paquetes%n", 
                              vuelosDescargados, paquetesDescargados);
         }
     }
@@ -639,7 +639,7 @@ public class AppPlanificador {
         }
         
         if (vuelosConCapacidadReducida > 0) {
-            System.out.printf("⚠️ %d vuelos tienen capacidad reducida por ocupación previa%n", 
+            System.out.printf(">> %d vuelos tienen capacidad reducida por ocupación previa%n", 
                              vuelosConCapacidadReducida);
         }
         
@@ -667,7 +667,7 @@ public class AppPlanificador {
             }
         }
         
-        System.out.printf("📊 Estado recursos - Almacenes ocupados: %d/%d (%d paquetes), Vuelos ocupados: %d/%d%n",
+        System.out.printf(">> Estado recursos - Almacenes ocupados: %d/%d (%d paquetes), Vuelos ocupados: %d/%d%n",
                          almacenesOcupados, aeropuertos.size(), totalPaquetesEnAlmacenes, 
                          vuelosOcupados, vuelos.size());
     }

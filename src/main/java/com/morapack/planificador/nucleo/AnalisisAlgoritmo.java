@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 public class AnalisisAlgoritmo {
     
     public static void analizarConfiguracionACO(ParametrosAco p) {
-        System.out.println("=== 🔍 ANÁLISIS DE CONFIGURACIÓN ACO ===");
+        System.out.println("=== >> ANÁLISIS DE CONFIGURACIÓN ACO ===");
         
         // Análisis de balance exploración vs explotación
         double balanceExploracion = p.alpha / (p.alpha + p.beta);
@@ -19,43 +19,43 @@ public class AnalisisAlgoritmo {
                          balanceExploracion, p.alpha, p.beta);
         
         if (balanceExploracion < 0.3) {
-            System.out.println("⚠️  PROBLEMA: Demasiada explotación, poca exploración");
+            System.out.println(">> PROBLEMA: Demasiada explotación, poca exploración");
             System.out.println("   → Las hormigas siguen siempre las mismas rutas conocidas");
             System.out.println("   → Solución: Aumentar α o reducir β");
         } else if (balanceExploracion > 0.7) {
-            System.out.println("⚠️  PROBLEMA: Demasiada exploración, poca explotación");
+            System.out.println(">> PROBLEMA: Demasiada exploración, poca explotación");
             System.out.println("   → Las hormigas no aprenden de buenas rutas encontradas");
             System.out.println("   → Solución: Reducir α o aumentar β");
         } else {
-            System.out.println("✅ Balance exploración/explotación: ÓPTIMO");
+            System.out.println(">> Balance exploración/explotación: ÓPTIMO");
         }
         
         // Análisis de evaporación
         System.out.printf("Tasa de evaporación: %.2f%n", p.rho);
         if (p.rho < 0.1) {
-            System.out.println("⚠️  PROBLEMA CRÍTICO: Evaporación muy baja - convergencia prematura");
+            System.out.println(">> PROBLEMA CRÍTICO: Evaporación muy baja - convergencia prematura");
             System.out.println("   → Las feromonas se acumulan indefinidamente");
             System.out.println("   → El algoritmo se queda en mínimos locales");
             System.out.println("   → Solución: Aumentar ρ a 0.3-0.5");
         } else if (p.rho > 0.8) {
-            System.out.println("⚠️  PROBLEMA: Evaporación muy alta - pierde memoria");
+            System.out.println(">> PROBLEMA: Evaporación muy alta - pierde memoria");
             System.out.println("   → Las feromonas desaparecen antes de acumularse");
             System.out.println("   → Solución: Reducir ρ a 0.3-0.5");
         } else {
-            System.out.println("✅ Tasa de evaporación: BUENA");
+            System.out.println(">> Tasa de evaporación: BUENA");
         }
         
         // Análisis de intensidad
         System.out.printf("Intensidad de refuerzo: %.1f%n", p.Q);
         if (p.Q > 150) {
-            System.out.println("⚠️  PROBLEMA: Refuerzo muy alto - convergencia prematura");
+            System.out.println(">> PROBLEMA: Refuerzo muy alto - convergencia prematura");
             System.out.println("   → Las primeras rutas encontradas dominan completamente");
             System.out.println("   → Solución: Reducir Q a 50-100");
         } else if (p.Q < 10) {
-            System.out.println("⚠️  PROBLEMA: Refuerzo muy bajo - no hay aprendizaje");
+            System.out.println(">> PROBLEMA: Refuerzo muy bajo - no hay aprendizaje");
             System.out.println("   → Solución: Aumentar Q a 50-100");
         } else {
-            System.out.println("✅ Intensidad de refuerzo: ADECUADA");
+            System.out.println(">> Intensidad de refuerzo: ADECUADA");
         }
         
         // Análisis de población
@@ -64,32 +64,32 @@ public class AnalisisAlgoritmo {
                          p.hormigas, p.iteraciones, ejecucionesTotales);
         
         if (ejecucionesTotales > 3000) {
-            System.out.println("⚠️  AVISO: Configuración muy costosa computacionalmente");
+            System.out.println(">> AVISO: Configuración muy costosa computacionalmente");
             System.out.println("   → Tiempo de ejecución puede ser excesivo");
         } else if (ejecucionesTotales < 500) {
-            System.out.println("⚠️  PROBLEMA: Configuración insuficiente");
+            System.out.println(">> PROBLEMA: Configuración insuficiente");
             System.out.println("   → Pocas exploraciones para problemas complejos");
         } else {
-            System.out.println("✅ Esfuerzo computacional: EQUILIBRADO");
+            System.out.println(">> Esfuerzo computacional: EQUILIBRADO");
         }
         
         // Análisis de longitud de ruta
         System.out.printf("Pasos máximos permitidos: %d%n", p.pasosMax);
         if (p.pasosMax > 50) {
-            System.out.println("⚠️  PROBLEMA: Pasos máximos muy altos - rutas ineficientes");
+            System.out.println(">> PROBLEMA: Pasos máximos muy altos - rutas ineficientes");
             System.out.println("   → Permite rutas con muchas escalas innecesarias");
             System.out.println("   → Solución: Reducir a 20-30 pasos");
         } else if (p.pasosMax < 10) {
-            System.out.println("⚠️  PROBLEMA: Pasos máximos muy bajos - rutas imposibles");
+            System.out.println(">> PROBLEMA: Pasos máximos muy bajos - rutas imposibles");
             System.out.println("   → Algunas rutas válidas no se pueden construir");
             System.out.println("   → Solución: Aumentar a 15-25 pasos");
         } else {
-            System.out.println("✅ Pasos máximos: RAZONABLES");
+            System.out.println(">> Pasos máximos: RAZONABLES");
         }
     }
     
     public static void analizarDistribucionPedidos(List<Pedido> pedidos) {
-        System.out.println("\n=== 📊 ANÁLISIS DE DISTRIBUCIÓN DE PEDIDOS ===");
+        System.out.println("\n=== >> ANÁLISIS DE DISTRIBUCIÓN DE PEDIDOS ===");
         
         // Distribución por días
         Map<Integer, Integer> pedidosPorDia = new HashMap<>();
@@ -120,7 +120,7 @@ public class AnalisisAlgoritmo {
                          minPedidos, maxPedidos, promedioPedidos, totalDias);
         
         if (maxPedidos > promedioPedidos * 2) {
-            System.out.println("⚠️  PROBLEMA: Distribución muy desigual de pedidos");
+            System.out.println(">> PROBLEMA: Distribución muy desigual de pedidos");
             System.out.println("   → Los días con alta carga saturan recursos y causan asignaciones incompletas");
             System.out.println("   → Considerar balancear la carga o aumentar capacidades");
         }
@@ -131,7 +131,7 @@ public class AnalisisAlgoritmo {
         System.out.printf("Rango temporal: día %d al %d (%d días de span)%n", diaMin, diaMax, (diaMax - diaMin + 1));
         
         if ((diaMax - diaMin + 1) > 31) {
-            System.out.println("⚠️  PROBLEMA: Pedidos fuera del rango mensual estándar");
+            System.out.println(">> PROBLEMA: Pedidos fuera del rango mensual estándar");
         }
         
         // Distribución por destinos
@@ -220,7 +220,7 @@ public class AnalisisAlgoritmo {
                                  hub, alcanzables.size(), aeropuertos.size(), porcentajeAlcanzable);
                 
                 if (porcentajeAlcanzable < 80) {
-                    System.out.printf("    ⚠️  Hub %s tiene conectividad limitada%n", hub);
+                    System.out.printf("    >> Hub %s tiene conectividad limitada%n", hub);
                 }
             }
         }
@@ -233,7 +233,7 @@ public class AnalisisAlgoritmo {
             System.out.println("❌ PROBLEMA CRÍTICO: Red no totalmente conectada");
             System.out.println("   → Algunos destinos pueden ser inalcanzables desde ciertos orígenes");
         } else {
-            System.out.println("✅ Red totalmente conectada");
+            System.out.println(">> Red totalmente conectada");
         }
     }
     
@@ -282,7 +282,7 @@ public class AnalisisAlgoritmo {
     }
     
     public static ParametrosAco recomendarParametrosOptimos(int numPedidos, int numAeropuertos) {
-        System.out.println("\n=== 💡 RECOMENDACIONES DE PARÁMETROS ÓPTIMOS ===");
+        System.out.println("\n=== >> RECOMENDACIONES DE PARÁMETROS ÓPTIMOS ===");
         
         ParametrosAco optimizado = new ParametrosAco();
         
@@ -296,7 +296,7 @@ public class AnalisisAlgoritmo {
             optimizado.rho = 0.5;       // Evaporación balanceada
             optimizado.Q = 50.0;        // Refuerzo moderado
             optimizado.pasosMax = 20;   // Rutas cortas
-            System.out.println("📊 Configuración para problema PEQUEÑO (velocidad optimizada)");
+            System.out.println(">> Configuración para problema PEQUEÑO (velocidad optimizada)");
         } else if (numPedidos < 200) {
             // Problema mediano: Balance velocidad-calidad
             optimizado.hormigas = 12;
@@ -306,7 +306,7 @@ public class AnalisisAlgoritmo {
             optimizado.rho = 0.4;       // Menos evaporación para mejor memoria
             optimizado.Q = 75.0;
             optimizado.pasosMax = 25;
-            System.out.println("📊 Configuración para problema MEDIANO (balance optimizado)");
+            System.out.println(">> Configuración para problema MEDIANO (balance optimizado)");
         } else {
             // Problema grande: Enfoque en calidad
             optimizado.hormigas = 15;
@@ -316,13 +316,13 @@ public class AnalisisAlgoritmo {
             optimizado.rho = 0.3;       // Menor evaporación = mejor memoria
             optimizado.Q = 100.0;
             optimizado.pasosMax = 30;
-            System.out.println("📊 Configuración para problema GRANDE (calidad optimizada)");
+            System.out.println(">> Configuración para problema GRANDE (calidad optimizada)");
         }
         
         System.out.printf("Parámetros recomendados:%n");
         System.out.printf("  🐜 Hormigas: %d%n", optimizado.hormigas);
-        System.out.printf("  🔄 Iteraciones: %d%n", optimizado.iteraciones);
-        System.out.printf("  📈 Alpha (feromonas): %.1f%n", optimizado.alpha);
+        System.out.printf("  >> Iteraciones: %d%n", optimizado.iteraciones);
+        System.out.printf("  >> Alpha (feromonas): %.1f%n", optimizado.alpha);
         System.out.printf("  🎯 Beta (heurística): %.1f%n", optimizado.beta);
         System.out.printf("  💨 Rho (evaporación): %.1f%n", optimizado.rho);
         System.out.printf("  ⚡ Q (refuerzo): %.1f%n", optimizado.Q);
