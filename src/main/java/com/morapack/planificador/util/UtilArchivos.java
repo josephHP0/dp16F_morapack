@@ -12,7 +12,7 @@ import java.util.stream.Collectors;
 
 public class UtilArchivos {
     private static final DateTimeFormatter HHMM = DateTimeFormatter.ofPattern("H:mm");
-
+    
     private static String[] partirInteligente(String linea) {
         String t = linea.trim();
         if (t.isEmpty() || t.startsWith("#")) return new String[0];
@@ -168,28 +168,7 @@ public class UtilArchivos {
             }
         }
     }
-    public static void escribirPlanCsv(Path salidaPath, List<Asignacion> plan) throws IOException {
-        try (BufferedWriter writer = Files.newBufferedWriter(salidaPath)) {
-            writer.write("pedido_id,fecha_pedido,hub_origen,destino,ruta,paquetes_asignados,paquetes_pendientes,tiempo_entrega\n");
-            for (Asignacion asg : plan) {
-                String rutaStr = (asg.ruta == null) ? "" : String.join(" | ", asg.ruta.itinerario);
-                // Format fecha as dd/HH:mm
-                String fechaPedido = String.format("%02d/%02d:%02d", 
-                    asg.pedido.dia, asg.pedido.hora, asg.pedido.minuto);
-                // Calculate delivery time based on route total hours
-                double horasEntrega = (asg.ruta == null) ? 0.0 : asg.ruta.horasTotales;
-                writer.write(String.format(Locale.US, "%s,%s,%s,%s,%s,%d,%d,%.2f\n",
-                        asg.pedido.id,
-                        fechaPedido,
-                        asg.hubOrigen,
-                        asg.pedido.destinoIata,
-                        rutaStr,
-                        asg.paquetesAsignados,
-                        asg.paquetesPendientes,
-                        horasEntrega));
-            }
-        }
-    }
+   
 
     public static double distanciaKm(Aeropuerto a1, Aeropuerto a2) {
         double lat1 = parseLatLon(a1.getLatitud());
@@ -217,4 +196,45 @@ public class UtilArchivos {
         double sign = (s.contains("S") || s.contains("W")) ? -1 : 1;
         return sign * (deg + min/60.0 + sec/3600.0);
     }
+    
+    public static void escribirPlanCsv(Path salidaPath, List<Asignacion> plan) throws IOException {
+        // Asegura que exista el directorio de salida
+        Path parent = (salidaPath.getParent() == null) ? Paths.get(".") : salidaPath.getParent();
+        Files.createDirectories(parent);
+
+        try (BufferedWriter writer = Files.newBufferedWriter(salidaPath)) {
+            // Encabezado
+            writer.write("pedido_id,fecha_pedido,hub_origen,destino,ruta,paquetes_asignados,paquetes_pendientes,tiempo_entrega\n");
+
+            for (Asignacion asg : plan) {
+                if (asg == null || asg.pedido == null) continue;
+
+                // Itinerario en texto
+                String rutaStr = (asg.ruta == null || asg.ruta.itinerario.isEmpty())
+                        ? ""
+                        : String.join(" | ", asg.ruta.itinerario);
+
+                // Fecha del pedido dd/HH:mm
+                String fechaPedido = String.format("%02d/%02d:%02d",
+                        asg.pedido.dia, asg.pedido.hora, asg.pedido.minuto);
+
+                // Horas totales estimadas
+                double horasEntrega = (asg.ruta == null) ? 0.0 : asg.ruta.horasTotales;
+
+                writer.write(String.format(Locale.US,
+                        "%s,%s,%s,%s,%s,%d,%d,%.2f\n",
+                        asg.pedido.id,
+                        fechaPedido,
+                        asg.hubOrigen,
+                        asg.pedido.destinoIata,
+                        rutaStr,
+                        asg.paquetesAsignados,
+                        asg.paquetesPendientes,
+                        horasEntrega));
+            }
+        }
+    }
+
+  
+
 }
