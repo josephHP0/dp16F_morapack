@@ -11,7 +11,7 @@ import java.util.stream.Collectors;
 
 public class AppPlanificador {
 
-    // === CLASES PARA GESTIÓN TEMPORAL REALISTA ===
+    // === CLASES PARA GESTIÓN TEMPORAL ===
     
     static class PaqueteEnAlmacen {
         int cantidad;
@@ -215,14 +215,14 @@ public class AppPlanificador {
                     int solicitados = pedido.paquetes;
                     int asignados = asignadosPorPedido.getOrDefault(pedido.id, 0);
                     
-                    System.out.printf("  📋 Pedido %s: %d/%d paquetes (%.1f%%)%n", 
+                    System.out.printf("  Pedido %s: %d/%d paquetes (%.1f%%)%n", 
                                      pedido.id, asignados, solicitados, (asignados * 100.0 / solicitados));
                     System.out.printf("     Destino: %s, Día: %d, Hora: %02d:%02d%n", 
                                      pedido.destinoIata, pedido.dia, pedido.hora, pedido.minuto);
                     
                     // Verificar si el destino existe
                     if (!aeropuertos.containsKey(pedido.destinoIata)) {
-                        System.out.println("     ❌ ERROR: Aeropuerto destino no existe");
+                        System.out.println("     ERROR: Aeropuerto destino no existe");
                         continue;
                     }
                     
@@ -235,16 +235,16 @@ public class AppPlanificador {
                     System.out.printf("     >> Vuelos hacia %s: %d disponibles%n", pedido.destinoIata, vuelosAlDestino);
                     
                     if (vuelosAlDestino == 0) {
-                        System.out.println("     ❌ PROBLEMA: No hay vuelos hacia este destino");
+                        System.out.println("     PROBLEMA: No hay vuelos hacia este destino");
                     }
                     
                     // Verificar capacidad de almacén
-                    System.out.printf("     🏪 Capacidad almacén: %d/%d (%.1f%% ocupado)%n", 
+                    System.out.printf("     Capacidad almacén: %d/%d (%.1f%% ocupado)%n", 
                                      destino.cargaEntrante, destino.capacidad,
                                      (destino.cargaEntrante * 100.0 / destino.capacidad));
                     
                     if (destino.cargaEntrante >= destino.capacidad) {
-                        System.out.println("     ❌ PROBLEMA: Almacén saturado");
+                        System.out.println("     PROBLEMA: Almacén saturado");
                     }
                 }
             }
@@ -256,13 +256,13 @@ public class AppPlanificador {
         Set<String> destinosConVuelos = vuelos.stream().map(v -> v.destino).collect(Collectors.toSet());
         Set<String> destinosPedidos = pedidos.stream().map(p -> p.destinoIata).collect(Collectors.toSet());
         
-        System.out.println("  🌐 Aeropuertos con vuelos entrantes: " + destinosConVuelos.size() + "/" + aeropuertos.size());
+        System.out.println("  Aeropuertos con vuelos entrantes: " + destinosConVuelos.size() + "/" + aeropuertos.size());
         
         Set<String> destinosSinVuelos = new HashSet<>(destinosPedidos);
         destinosSinVuelos.removeAll(destinosConVuelos);
         
         if (!destinosSinVuelos.isEmpty()) {
-            System.out.println("  ❌ Destinos de pedidos SIN vuelos: " + destinosSinVuelos);
+            System.out.println(" Destinos de pedidos SIN vuelos: " + destinosSinVuelos);
         }
         
         // Analizar saturación de almacenes
@@ -270,7 +270,7 @@ public class AppPlanificador {
                 .filter(a -> a.cargaEntrante >= a.capacidad)
                 .count();
         
-        System.out.println("  🏪 Almacenes saturados: " + almacenesSaturados + "/" + aeropuertos.size());
+        System.out.println(" Almacenes saturados: " + almacenesSaturados + "/" + aeropuertos.size());
         
         // Recomendar mejoras
         System.out.println("\n>> RECOMENDACIONES:");
@@ -325,7 +325,7 @@ public class AppPlanificador {
         List<Asignacion> consolidado = new ArrayList<>();
         
         // Simular día por día con logging detallado
-        System.out.println("\\n🎬 === SIMULACIÓN DÍA POR DÍA ===");
+        System.out.println("\\n=== SIMULACIÓN DÍA POR DÍA ===");
         
         // Ordenar pedidos
         pedidos.sort(Comparator
