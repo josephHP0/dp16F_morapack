@@ -5,80 +5,20 @@ import com.morapack.planificador.dominio.Vuelo;
 import com.morapack.planificador.dominio.Pedido;
 import com.morapack.planificador.util.UtilArchivos;
 
+// IMPORTAR LAS CLASES SEPARADAS
+import com.morapack.planificador.nucleo.EstadosTemporales.*;
+
 import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class AppPlanificador {
-
-    // === CLASES PARA GESTIÓN TEMPORAL ===
     
-    static class PaqueteEnAlmacen {
-        int cantidad;
-        int diaLlegada;
-        int minutoLlegada;
-        String pedidoId;
-        
-        PaqueteEnAlmacen(int cantidad, int diaLlegada, int minutoLlegada, String pedidoId) {
-            this.cantidad = cantidad;
-            this.diaLlegada = diaLlegada;
-            this.minutoLlegada = minutoLlegada;
-            this.pedidoId = pedidoId;
-        }
-    }
     
-    static class PaqueteEnVuelo {
-        int cantidad;
-        String pedidoId;
-        
-        PaqueteEnVuelo(int cantidad, String pedidoId) {
-            this.cantidad = cantidad;
-            this.pedidoId = pedidoId;
-        }
-    }
-    
-    static class EstadoVuelo {
-        int capacidadDisponible;
-        List<PaqueteEnVuelo> paquetesABordo;
-        int ultimoDiaOperacion;
-        
-        EstadoVuelo(int capacidadTotal) {
-            this.capacidadDisponible = capacidadTotal;
-            this.paquetesABordo = new ArrayList<>();
-            this.ultimoDiaOperacion = 0;
-        }
-    }
-    
-    static class EstadoAeropuerto {
-        List<PaqueteEnAlmacen> paquetesEnAlmacen;
-        int ocupacionTotal;
-        
-        EstadoAeropuerto() {
-            this.paquetesEnAlmacen = new ArrayList<>();
-            this.ocupacionTotal = 0;
-        }
-    }
     
     // Mapas para mantener estado entre días
     private static Map<Integer, EstadoVuelo> estadosVuelos = new HashMap<>();
     private static Map<String, EstadoAeropuerto> estadosAeropuertos = new HashMap<>();
-    
-    /**
-     * Clase para gestionar pedidos pendientes con control de SLA
-     */
-    static class PedidoPendiente {
-        final Pedido pedido;
-        int paquetesPendientes;
-        final int diaLimite;      // Día máximo para completar (pedido.dia + SLA)
-        final int diasSLA;        // Días SLA asignados (2 o 3)
-        
-        PedidoPendiente(Pedido pedido, int diaLimite, int diasSLA) {
-            this.pedido = pedido;
-            this.paquetesPendientes = pedido.paquetes;
-            this.diaLimite = diaLimite;
-            this.diasSLA = diasSLA;
-        }
-    }
 
     public static void main(String[] args) throws Exception {
         Map<String,String> arg = Arrays.stream(args)
@@ -88,7 +28,7 @@ public class AppPlanificador {
 
         Path aeropuertosPath = Paths.get(arg.getOrDefault("aeropuertos", "data/aeropuertos.txt"));
         Path vuelosPath      = Paths.get(arg.getOrDefault("vuelos", "data/vuelos.txt"));
-        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos_1.txt"));
+        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos2.txt"));
         Path cancelacionesPath = Paths.get(arg.getOrDefault("cancelaciones", "data/cancelaciones.txt"));
         Path salidaPath      = Paths.get(arg.getOrDefault("salida", "plan_asignacion.csv"));
 
@@ -146,8 +86,8 @@ public class AppPlanificador {
             System.out.println("Cancelaciones cargadas (líneas útiles): " + lineas);
         }
 
-        // EJECUTAR SIMULACIÓN CON MONITOREO DETALLADO DÍA POR DÍA Y RESPETO AL SLA
-        List<Asignacion> plan = ejecutarSimulacionConMonitoreoYSLA(
+        // EJECUTAR SIMULACIÓN CON CONTROL DE SLA DE MORAPACK
+        List<Asignacion> plan = ejecutarSimulacionConSLA(
                 aeropuertos,
                 vuelos,
                 pedidos,
@@ -315,12 +255,12 @@ public class AppPlanificador {
     }
     
     /**
-     * MÉTODO CORREGIDO: Ejecuta simulación respetando SLA de MoraPack
+     * MÉTODO PRINCIPAL: Ejecuta simulación respetando SLA de MoraPack
      * - Mismo continente: 2 días máximo
      * - Diferente continente: 3 días máximo
      * - Replanifica pedidos pendientes hasta vencer SLA
      */
-    private static List<Asignacion> ejecutarSimulacionConMonitoreoYSLA(
+    private static List<Asignacion> ejecutarSimulacionConSLA(
             Map<String, Aeropuerto> aeropuertos,
             List<Vuelo> vuelos,
             List<Pedido> pedidos,
@@ -344,7 +284,7 @@ public class AppPlanificador {
         
         List<Asignacion> consolidado = new ArrayList<>();
         
-        // === NUEVA ESTRUCTURA: MANTENER PEDIDOS PENDIENTES CON SLA ===
+        // === MANTENER PEDIDOS PENDIENTES CON SLA ===
         Map<String, PedidoPendiente> pedidosPendientes = new HashMap<>();
         
         // Clasificar pedidos inicialmente con SLA
@@ -359,8 +299,187 @@ public class AppPlanificador {
         
         System.out.println("\n=== SIMULACIÓN DÍA POR DÍA CON CONTROL SLA ===");
 
-        return ejecutarBuclePrincipalConSLA(aeropuertos, vuelos, parametros, cancelByDay, 
-                                          consolidado, pedidosPendientes, diaInicio, numeroDias, semilla);
+        // === BUCLE PRINCIPAL CON SLA ===
+        for (int d = 0; d < numeroDias; d++) {
+            int diaSim = diaInicio + d;
+            if (diaSim > 31) break;
+            
+            System.out.printf("%n=== DÍA %02d - REPLANIFICACIÓN CON SLA ====%n", diaSim);
+            long inicioTiempo = System.currentTimeMillis();
+            
+            // === 1. IDENTIFICAR PEDIDOS A PROCESAR HOY (CORREGIDO) ===
+            List<Pedido> pedidosParaProcesar = new ArrayList<>();
+            List<String> pedidosVencidos = new ArrayList<>();
+            List<String> pedidosCriticos = new ArrayList<>();
+            
+            for (Map.Entry<String, PedidoPendiente> entry : pedidosPendientes.entrySet()) {
+                PedidoPendiente pp = entry.getValue();
+                
+                if (pp.paquetesPendientes <= 0) continue; // Ya completado
+                
+                // VERIFICAR SLA
+                if (diaSim > pp.diaLimite) {
+                    pedidosVencidos.add(pp.pedido.id);
+                    continue;
+                } else if (diaSim == pp.diaLimite) {
+                    pedidosCriticos.add(pp.pedido.id);
+                    pedidosParaProcesar.add(crearPedidoTemporal(pp));
+                } else if (diaSim >= pp.pedido.dia) {
+                    pedidosParaProcesar.add(crearPedidoTemporal(pp));
+                }
+            }
+            
+            // === 2. REPORTAR ESTADO SLA ===
+            System.out.printf(">> ANÁLISIS SLA DEL DÍA:%n");
+            System.out.printf("   Pedidos a procesar: %d%n", pedidosParaProcesar.size());
+            System.out.printf("   Pedidos CRÍTICOS (último día): %d%n", pedidosCriticos.size());
+            System.out.printf("   Pedidos VENCIDOS (SLA perdido): %d%n", pedidosVencidos.size());
+            
+            if (!pedidosCriticos.isEmpty()) {
+                System.out.println("   ALERTA: Pedidos en último día de SLA - MÁXIMA PRIORIDAD");
+                for (String id : pedidosCriticos) {
+                    PedidoPendiente pp = pedidosPendientes.get(id);
+                    System.out.printf("      >> %s: %d paquetes (SLA %d días)%n", 
+                                     id, pp.paquetesPendientes, pp.diasSLA);
+                }
+            }
+            
+            if (!pedidosVencidos.isEmpty()) {
+                System.out.println("   PEDIDOS CON SLA VENCIDO (no se procesarán):");
+                for (String id : pedidosVencidos) {
+                    PedidoPendiente pp = pedidosPendientes.get(id);
+                    System.out.printf("      >> %s: %d paquetes perdidos (excedió %d días)%n", 
+                                     id, pp.paquetesPendientes, pp.diasSLA);
+                }
+            }
+            
+            if (pedidosParaProcesar.isEmpty()) {
+                System.out.println("   >> Sin pedidos válidos para procesar, continuando...");
+                continue;
+            }
+            
+            // === 3. PRIORIZACIÓN POR SLA ===
+            pedidosParaProcesar.sort((p1, p2) -> {
+                PedidoPendiente pp1 = pedidosPendientes.get(p1.id);
+                PedidoPendiente pp2 = pedidosPendientes.get(p2.id);
+                
+                int diasRestantes1 = pp1.diaLimite - diaSim;
+                int diasRestantes2 = pp2.diaLimite - diaSim;
+                
+                int comp = Integer.compare(diasRestantes1, diasRestantes2);
+                if (comp != 0) return comp;
+                
+                return Integer.compare(p1.hora, p2.hora);
+            });
+            
+            System.out.println(">> Pedidos priorizados por urgencia SLA");
+            
+            // === 4. GESTIÓN TEMPORAL Y CANCELACIONES ===
+            Set<Integer> cancelacionesDia = cancelByDay.getOrDefault(diaSim, Collections.emptySet());
+            analizarCancelacionesDelDiaDetallado(diaSim, cancelacionesDia, vuelos);
+            
+            System.out.println(">> Actualizando estados temporales...");
+            actualizarEstadoAlmacenes(aeropuertos, diaSim, 0);
+            actualizarEstadoVuelos(vuelos, aeropuertos, diaSim);
+            List<Vuelo> vuelosCopia = prepararVuelosConCapacidadReal(vuelos, diaSim);
+            mostrarEstadoRecursos(aeropuertos, vuelosCopia, diaSim);
+            
+            // === 5. PLANIFICACIÓN ACO ===
+            Map<Integer, Set<Integer>> cancelSoloHoy = new HashMap<>();
+            if (cancelByDay.containsKey(diaSim)) {
+                cancelSoloHoy.put(diaSim, cancelByDay.get(diaSim));
+            }
+            
+            System.out.println(">> Ejecutando ACO con priorización SLA...");
+            
+            List<Asignacion> planDelDia = PlanificadorAco.planificarConAco(
+                    aeropuertos, vuelosCopia, pedidosParaProcesar, parametros,
+                    semilla + diaSim, cancelSoloHoy, diaSim
+            );
+            
+            // === 6. ACTUALIZAR ESTADO DE PENDIENTES ===
+            int paquetesAsignadosHoy = 0;
+            int pedidosCompletados = 0;
+            
+            for (Asignacion asignacion : planDelDia) {
+                if (asignacion != null && asignacion.paquetesAsignados > 0) {
+                    String pedidoId = asignacion.pedido.id;
+                    int paquetesAsignados = asignacion.paquetesAsignados;
+                    
+                    PedidoPendiente pp = pedidosPendientes.get(pedidoId);
+                    if (pp != null) {
+                        int pendientesAntes = pp.paquetesPendientes;
+                        pp.paquetesPendientes = Math.max(0, pendientesAntes - paquetesAsignados);
+                        
+                        paquetesAsignadosHoy += paquetesAsignados;
+                        
+                        if (pp.paquetesPendientes == 0) {
+                            pedidosCompletados++;
+                            int diasUsados = diaSim - pp.pedido.dia;
+                            System.out.printf("   PEDIDO COMPLETADO: %s (SLA %d días, usado %d días)%n", 
+                                             pedidoId, pp.diasSLA, diasUsados);
+                        } else {
+                            double progreso = ((pendientesAntes - pp.paquetesPendientes) * 100.0) / pendientesAntes;
+                            int diasRestantes = pp.diaLimite - diaSim;
+                            System.out.printf("   PROGRESO: %s - %d paquetes (%.1f%% del pedido, %d días SLA restantes)%n", 
+                                             pedidoId, paquetesAsignados, progreso, diasRestantes);
+                        }
+                    }
+                }
+            }
+            
+            // === 7. MÉTRICAS CON SLA ===
+            int totalSolicitadoHoy = pedidosParaProcesar.stream().mapToInt(p -> p.paquetes).sum();
+            double eficienciaDelDia = totalSolicitadoHoy > 0 ? (paquetesAsignadosHoy * 100.0 / totalSolicitadoHoy) : 0.0;
+            
+            int totalPendientesGlobal = pedidosPendientes.values().stream()
+                    .mapToInt(pp -> pp.paquetesPendientes).sum();
+            int totalPedidosCompletados = (int) pedidosPendientes.values().stream()
+                    .filter(pp -> pp.paquetesPendientes == 0).count();
+            
+            double tasaCumplimientoSLA = pedidosPendientes.size() > 0 ? 
+                    (totalPedidosCompletados * 100.0 / pedidosPendientes.size()) : 0.0;
+            
+            System.out.printf(">> RESULTADOS DEL DÍA:%n");
+            System.out.printf("   Paquetes asignados hoy: %d/%d (%.1f%%)%n", 
+                             paquetesAsignadosHoy, totalSolicitadoHoy, eficienciaDelDia);
+            System.out.printf("   Pedidos completados hoy: %d%n", pedidosCompletados);
+            System.out.printf("   CUMPLIMIENTO SLA GLOBAL: %.1f%% (%d completados)%n", 
+                             tasaCumplimientoSLA, totalPedidosCompletados);
+            System.out.printf("   Paquetes pendientes restantes: %d%n", totalPendientesGlobal);
+            
+            if (!cancelacionesDia.isEmpty()) {
+                identificarImpactosCancelacionesDetallado(planDelDia, pedidosParaProcesar);
+            }
+            
+            // === 8. EJECUTAR ASIGNACIONES ===
+            ejecutarAsignacionesTemporales(planDelDia, aeropuertos, vuelosCopia, diaSim);
+            consolidado.addAll(planDelDia);
+            
+            long finTiempo = System.currentTimeMillis();
+            double tiempoEjecucion = (finTiempo - inicioTiempo) / 1000.0;
+            
+            String prefijo = tasaCumplimientoSLA >= 95 ? "+++" : tasaCumplimientoSLA >= 80 ? "+ +" : ">> ";
+            String estado = cancelacionesDia.isEmpty() ? "Normal" : "Con cancelaciones";
+            
+            System.out.printf("%s Día %02d completado en %.1fs - SLA: %.1f%% (%s)%n", 
+                             prefijo, diaSim, tiempoEjecucion, tasaCumplimientoSLA, estado);
+            
+            if (!cancelacionesDia.isEmpty()) {
+                System.out.printf("   >> %d cancelaciones procesadas%n", cancelacionesDia.size());
+            }
+            
+            System.out.println("   ─────────────────────────────────────────");
+            
+            // === 9. CRITERIO DE PARADA ===
+            if (totalPendientesGlobal == 0) {
+                System.out.println("\nTODOS LOS PAQUETES ASIGNADOS DENTRO DEL SLA!");
+                break;
+            }
+        }
+        
+        mostrarResumenFinalConSLA(pedidosPendientes);
+        return consolidado;
     }
     
     /**
@@ -782,7 +901,7 @@ public class AppPlanificador {
         }
         
         if (paquetesEjecutados > 0) {
-            System.out.printf("📦 Asignaciones ejecutadas: %d paquetes cargados en %d vuelos%n", 
+            System.out.printf("Asignaciones ejecutadas: %d paquetes cargados en %d vuelos%n", 
                              paquetesEjecutados, vuelosUtilizados);
         }
     }
