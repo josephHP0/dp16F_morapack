@@ -28,7 +28,7 @@ public class AppPlanificador {
 
         Path aeropuertosPath = Paths.get(arg.getOrDefault("aeropuertos", "data/aeropuertos.txt"));
         Path vuelosPath      = Paths.get(arg.getOrDefault("vuelos", "data/vuelos.txt"));
-        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos2.txt"));
+        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos_1.txt"));
         Path cancelacionesPath = Paths.get(arg.getOrDefault("cancelaciones", "data/cancelaciones.txt"));
         Path salidaPath      = Paths.get(arg.getOrDefault("salida", "plan_asignacion.csv"));
 
@@ -59,31 +59,31 @@ public class AppPlanificador {
         int diaInicio = 1;
         int dias = 31;  // Simulación mensual completa para cubrir TODOS los pedidos
 
-        System.out.println("[SIMULACIÓN MENSUAL COMPLETA] Inicio=" + diaInicio + " días=" + dias);
+        System.out.println("===========================SIMULACIÓN=================================]");
         
         // ANÁLISIS PREVIO COMPLETO DEL SISTEMA
-        System.out.println("\n=== ANÁLISIS PREVIO DEL SISTEMA ===");
-        AnalisisAlgoritmo.analizarConfiguracionACO(p);
-        AnalisisAlgoritmo.analizarDistribucionPedidos(pedidos);
-        AnalisisAlgoritmo.analizarConectividad(aeropuertos, vuelos);
+        //System.out.println("\n=== ANÁLISIS PREVIO DEL SISTEMA ===");
+        //AnalisisAlgoritmo.analizarConfiguracionACO(p);
+        //AnalisisAlgoritmo.analizarDistribucionPedidos(pedidos);
+        //AnalisisAlgoritmo.analizarConectividad(aeropuertos, vuelos);
         
         // Aplicar parámetros recomendados automáticamente
         ParametrosAco recomendado = AnalisisAlgoritmo.recomendarParametrosOptimos(
             pedidos.size(), aeropuertos.size());
         
-        System.out.println("\n>> APLICANDO PARÁMETROS OPTIMIZADOS AUTOMÁTICAMENTE...");
+        //System.out.println("\n>> APLICANDO PARÁMETROS OPTIMIZADOS AUTOMÁTICAMENTE...");
         p = recomendado;
         
-        System.out.println(">> PARÁMETROS FINALES: " + p.hormigas + " hormigas × " + p.iteraciones + " iteraciones = " + (p.hormigas * p.iteraciones) + " ejecuciones");
+        //System.out.println(">> PARÁMETROS FINALES: " + p.hormigas + " hormigas × " + p.iteraciones + " iteraciones = " + (p.hormigas * p.iteraciones) + " ejecuciones");
         if (!Files.exists(cancelacionesPath)) {
-            System.out.println("ADVERTENCIA: No existe el archivo de cancelaciones en " + cancelacionesPath.toAbsolutePath());
-            System.out.println("Se simulará SIN cancelaciones.");
+            //System.out.println("ADVERTENCIA: No existe el archivo de cancelaciones en " + cancelacionesPath.toAbsolutePath());
+            //System.out.println("Se simulará SIN cancelaciones.");
         } else {
             long lineas;
             try (var stream = Files.lines(cancelacionesPath)) {
                 lineas = stream.filter(s->!s.trim().isEmpty() && !s.startsWith("#")).count();
             }
-            System.out.println("Cancelaciones cargadas (líneas útiles): " + lineas);
+            //System.out.println("Cancelaciones cargadas (líneas útiles): " + lineas);
         }
 
         // EJECUTAR SIMULACIÓN CON CONTROL DE SLA DE MORAPACK
@@ -99,10 +99,10 @@ public class AppPlanificador {
         );
 
         // DIAGNÓSTICO DETALLADO DE PAQUETES PENDIENTES
-        diagnosticarPaquetesPendientes(plan, pedidos, aeropuertos, vuelos);
+        //diagnosticarPaquetesPendientes(plan, pedidos, aeropuertos, vuelos);
         
         // ANÁLISIS POST-EJECUCIÓN DE PROBLEMAS ESPECÍFICOS
-        AnalisisAlgoritmo.analizarProblemasEspecificos(plan, pedidos);
+        //AnalisisAlgoritmo.analizarProblemasEspecificos(plan, pedidos);
 
         // Escritura de salida
         UtilArchivos.escribirPlanCsv(salidaPath, plan);
@@ -626,7 +626,7 @@ public class AppPlanificador {
     }
     
     private static void mostrarResumenCancelacionesDetallado(List<PlanificadorAco.Cancelacion> cancels, int diaInicio, int numeroDias) {
-        System.out.println("\\n📋 Resumen detallado de cancelaciones por día:");
+        System.out.println("\\nResumen detallado de cancelaciones por día:");
         
         Map<Integer, List<PlanificadorAco.Cancelacion>> cancelsPorDia = cancels.stream()
                 .filter(c -> c.dia >= diaInicio && c.dia < diaInicio + numeroDias)

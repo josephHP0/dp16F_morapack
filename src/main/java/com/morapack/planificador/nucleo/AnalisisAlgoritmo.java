@@ -319,33 +319,33 @@ public class AnalisisAlgoritmo {
             System.out.println(">> Configuración para problema GRANDE (calidad optimizada)");
         }
         
-        System.out.printf("Parámetros recomendados:%n");
+        /*System.out.printf("Parámetros recomendados:%n");
         System.out.printf("  🐜 Hormigas: %d%n", optimizado.hormigas);
         System.out.printf("  >> Iteraciones: %d%n", optimizado.iteraciones);
         System.out.printf("  >> Alpha (feromonas): %.1f%n", optimizado.alpha);
         System.out.printf("  🎯 Beta (heurística): %.1f%n", optimizado.beta);
         System.out.printf("  💨 Rho (evaporación): %.1f%n", optimizado.rho);
         System.out.printf("  ⚡ Q (refuerzo): %.1f%n", optimizado.Q);
-        System.out.printf("  📏 Pasos máx: %d%n", optimizado.pasosMax);
+        System.out.printf("  📏 Pasos máx: %d%n", optimizado.pasosMax);*/
         
         int esfuerzoTotal = optimizado.hormigas * optimizado.iteraciones;
-        System.out.printf("  💪 Esfuerzo total: %d ejecuciones%n", esfuerzoTotal);
+        //System.out.printf("  💪 Esfuerzo total: %d ejecuciones%n", esfuerzoTotal);
         
         // Estimación de tiempo
         double tiempoEstimado = esfuerzoTotal * 0.01; // Aproximación: 0.01s por ejecución
         if (tiempoEstimado < 10) {
-            System.out.printf("  ⏱️  Tiempo estimado: %.1f segundos (RÁPIDO)%n", tiempoEstimado);
+            //System.out.printf("    Tiempo estimado: %.1f segundos (RÁPIDO)%n", tiempoEstimado);
         } else if (tiempoEstimado < 60) {
-            System.out.printf("  ⏱️  Tiempo estimado: %.1f segundos (MODERADO)%n", tiempoEstimado);
+           // System.out.printf("    Tiempo estimado: %.1f segundos (MODERADO)%n", tiempoEstimado);
         } else {
-            System.out.printf("  ⏱️  Tiempo estimado: %.1f segundos (LENTO)%n", tiempoEstimado);
+            //System.out.printf("    Tiempo estimado: %.1f segundos (LENTO)%n", tiempoEstimado);
         }
         
         return optimizado;
     }
     
     public static void analizarProblemasEspecificos(List<Asignacion> plan, List<Pedido> pedidos) {
-        System.out.println("\n=== 🔬 ANÁLISIS DE PROBLEMAS ESPECÍFICOS ===");
+        //System.out.println("\n=== ANÁLISIS DE PROBLEMAS ESPECÍFICOS ===");
         
         // Identificar patrones en pedidos no asignados
         List<Pedido> pedidosSinAsignacion = new ArrayList<>();
