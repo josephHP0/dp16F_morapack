@@ -157,7 +157,7 @@ public class AnalisisAlgoritmo {
     }
     
     public static void analizarConectividad(Map<String, Aeropuerto> aeropuertos, List<Vuelo> vuelos) {
-        System.out.println("\n=== 🌐 ANÁLISIS DE CONECTIVIDAD ===");
+        System.out.println("\n===  ANÁLISIS DE CONECTIVIDAD ===");
         
         // Matriz de conectividad
         Map<String, Set<String>> conexiones = new HashMap<>();
@@ -196,7 +196,7 @@ public class AnalisisAlgoritmo {
         aeropuertosSinSalida.removeAll(gradoSalida.keySet());
         
         if (!aeropuertosSinSalida.isEmpty()) {
-            System.out.println("❌ PROBLEMA CRÍTICO: Aeropuertos sin vuelos salientes: " + aeropuertosSinSalida);
+            System.out.println(" PROBLEMA CRÍTICO: Aeropuertos sin vuelos salientes: " + aeropuertosSinSalida);
             System.out.println("   → Estos aeropuertos no pueden ser hubs intermedios");
         }
         
@@ -204,7 +204,7 @@ public class AnalisisAlgoritmo {
         aeropuertosSinEntrada.removeAll(gradoEntrada.keySet());
         
         if (!aeropuertosSinEntrada.isEmpty()) {
-            System.out.println("❌ PROBLEMA CRÍTICO: Aeropuertos sin vuelos entrantes: " + aeropuertosSinEntrada);
+            System.out.println(" PROBLEMA CRÍTICO: Aeropuertos sin vuelos entrantes: " + aeropuertosSinEntrada);
             System.out.println("   → Estos destinos son inalcanzables");
         }
         
@@ -230,7 +230,7 @@ public class AnalisisAlgoritmo {
         System.out.printf("Componentes conectados: %d%n", componentesConectados);
         
         if (componentesConectados > 1) {
-            System.out.println("❌ PROBLEMA CRÍTICO: Red no totalmente conectada");
+            System.out.println(" PROBLEMA CRÍTICO: Red no totalmente conectada");
             System.out.println("   → Algunos destinos pueden ser inalcanzables desde ciertos orígenes");
         } else {
             System.out.println(">> Red totalmente conectada");
@@ -320,16 +320,16 @@ public class AnalisisAlgoritmo {
         }
         
         /*System.out.printf("Parámetros recomendados:%n");
-        System.out.printf("  🐜 Hormigas: %d%n", optimizado.hormigas);
+        System.out.printf("   Hormigas: %d%n", optimizado.hormigas);
         System.out.printf("  >> Iteraciones: %d%n", optimizado.iteraciones);
         System.out.printf("  >> Alpha (feromonas): %.1f%n", optimizado.alpha);
-        System.out.printf("  🎯 Beta (heurística): %.1f%n", optimizado.beta);
-        System.out.printf("  💨 Rho (evaporación): %.1f%n", optimizado.rho);
-        System.out.printf("  ⚡ Q (refuerzo): %.1f%n", optimizado.Q);
-        System.out.printf("  📏 Pasos máx: %d%n", optimizado.pasosMax);*/
+        System.out.printf("   Beta (heurística): %.1f%n", optimizado.beta);
+        System.out.printf("   Rho (evaporación): %.1f%n", optimizado.rho);
+        System.out.printf("   Q (refuerzo): %.1f%n", optimizado.Q);
+        System.out.printf("   Pasos máx: %d%n", optimizado.pasosMax);*/
         
         int esfuerzoTotal = optimizado.hormigas * optimizado.iteraciones;
-        //System.out.printf("  💪 Esfuerzo total: %d ejecuciones%n", esfuerzoTotal);
+        //System.out.printf("   Esfuerzo total: %d ejecuciones%n", esfuerzoTotal);
         
         // Estimación de tiempo
         double tiempoEstimado = esfuerzoTotal * 0.01; // Aproximación: 0.01s por ejecución

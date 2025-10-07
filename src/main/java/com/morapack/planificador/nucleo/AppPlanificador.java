@@ -28,7 +28,7 @@ public class AppPlanificador {
 
         Path aeropuertosPath = Paths.get(arg.getOrDefault("aeropuertos", "data/aeropuertos.txt"));
         Path vuelosPath      = Paths.get(arg.getOrDefault("vuelos", "data/vuelos.txt"));
-        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos_1.txt"));
+        Path pedidosPath     = Paths.get(arg.getOrDefault("pedidos", "data/pedidos_semanal.txt"));
         Path cancelacionesPath = Paths.get(arg.getOrDefault("cancelaciones", "data/cancelaciones.txt"));
         Path salidaPath      = Paths.get(arg.getOrDefault("salida", "plan_asignacion.csv"));
 
