@@ -2,6 +2,7 @@ package com.morapack.planificador.util;
 
 import com.morapack.planificador.dominio.*;
 import com.morapack.planificador.nucleo.Asignacion;
+import com.morapack.planificador.simulation.CancellationRecord;
 
 import java.io.*;
 import java.nio.file.*;
@@ -36,7 +37,7 @@ public class UtilArchivos {
         for (String linea : Files.readAllLines(p)) {
             if (linea == null || linea.isBlank()) continue; // evita líneas vacías
             Aeropuerto aeropuerto = parseAeropuerto(linea);
-            mapa.put(aeropuerto.getCodigo(), aeropuerto);
+            mapa.put(aeropuerto.getIata(), aeropuerto);
         }
         System.out.println("Aeropuertos cargados: " + String.join(", ", mapa.keySet())); // Debug line
         return mapa;
@@ -45,16 +46,27 @@ public class UtilArchivos {
     public static Aeropuerto parseAeropuerto(String linea) {
         String[] partes = linea.split(",");
         int id = Integer.parseInt(partes[0].trim());
-        String codigo = partes[1].trim();
+        String iata = partes[1].trim();
         String ciudad = partes[2].trim();
         String pais = partes[3].trim();
         String abrev = partes[4].trim();
         int gmt = Integer.parseInt(partes[5].trim());
         int capacidad = Integer.parseInt(partes[6].trim());
-        String latitud = partes[7].trim();
-        String longitud = partes[8].trim();
-        String continente = partes[9].trim(); // Nuevo campo
-        return new Aeropuerto(id, codigo, ciudad, pais, abrev, gmt, capacidad, latitud, longitud, continente, 0);
+        String latitudStr = partes[7].trim();
+        String longitudStr = partes[8].trim();
+        String continente = partes[9].trim();
+        
+        // Convertir coordenadas DMS a decimal
+        double lat = parseLatLon(latitudStr);
+        double lon = parseLatLon(longitudStr);
+        
+        // Marcar como fuentes infinitas (hubs) los aeropuertos específicos
+        // Según comentarios en RealTimeConsole: SPIM/EBCI/UBBB son los hubs principales
+        boolean infiniteSource = iata.equals("SPIM") || iata.equals("EBCI") || iata.equals("UBBB");
+        
+        String nombre = ciudad + ", " + pais; // Construir nombre descriptivo
+        
+        return new Aeropuerto(iata, nombre, lat, lon, capacidad, infiniteSource);
     }
 
     public static List<Vuelo> cargarVuelos(Path p, Map<String, Aeropuerto> aeropuertos) throws IOException {
@@ -71,25 +83,16 @@ public class UtilArchivos {
             int llegada = hhmmAMinutos(f[3]);
             int capacidad = parsearEntero(f[4]);
 
-            // Obtener GMT de origen y destino
-            int gmtOrigen = aeropuertos.get(origen).getGmt();
-            int gmtDestino = aeropuertos.get(destino).getGmt();
-
-            // Ajustar llegada a la zona horaria del origen
-            int llegadaEnOrigen = llegada - (gmtDestino - gmtOrigen) * 60;
-
-            // Calcular duración real
-            int duracion = llegadaEnOrigen - salida;
+            // Sin información de GMT en la nueva estructura, asumimos mismo huso horario
+            // o calculamos duración simple
+            int duracion = llegada - salida;
             if (duracion < 0) duracion += 24 * 60; // si cruza medianoche
 
-            // ...existing code...
-            String continenteOrigen = aeropuertos.get(origen).getContinente();
-            String continenteDestino = aeropuertos.get(destino).getContinente();
-            boolean esContinental = continenteOrigen.equals(continenteDestino);
-            // ...puedes guardar este dato en el objeto Vuelo o usarlo para lógica de restricciones...
+            // Sin información de continente disponible por ahora
+            boolean esContinental = true; // valor por defecto
 
-            // Crea el vuelo usando la duración real
-            vuelos.add(new Vuelo(id++, origen, destino, salida, llegada, capacidad, duracion,esContinental));
+            // Crea el vuelo usando la duración simple
+            vuelos.add(new Vuelo(id++, origen, destino, salida, llegada, capacidad, duracion, esContinental));
         }
         return vuelos;
     }
@@ -171,10 +174,10 @@ public class UtilArchivos {
    
 
     public static double distanciaKm(Aeropuerto a1, Aeropuerto a2) {
-        double lat1 = parseLatLon(a1.getLatitud());
-        double lon1 = parseLatLon(a1.getLongitud());
-        double lat2 = parseLatLon(a2.getLatitud());
-        double lon2 = parseLatLon(a2.getLongitud());
+        double lat1 = a1.lat;
+        double lon1 = a1.lon;
+        double lat2 = a2.lat;
+        double lon2 = a2.lon;
         double R = 6371.0; // Radio de la Tierra en km
         double dLat = Math.toRadians(lat2 - lat1);
         double dLon = Math.toRadians(lon2 - lon1);
@@ -235,6 +238,79 @@ public class UtilArchivos {
         }
     }
 
-  
+    // ====== Métodos compatibles con RealTimeConsole ======
+    
+    public static Map<String, Aeropuerto> leerAeropuertos(Path p) throws IOException {
+        return cargarAeropuertos(p);
+    }
+    
+    public static List<Vuelo> leerVuelos(Path p) throws IOException {
+        // Para leerVuelos necesitamos primero cargar aeropuertos para obtener las zonas horarias
+        Path aeropuertosPath = p.getParent().resolve("aeropuertos.txt");
+        Map<String, Aeropuerto> aeropuertos = cargarAeropuertos(aeropuertosPath);
+        return cargarVuelos(p, aeropuertos);
+    }
+    
+    public static List<Pedido> leerPedidos(Path p, java.time.YearMonth periodo) throws IOException {
+        // Para compatibilidad, obtenemos las IATA válidas desde aeropuertos
+        Path aeropuertosPath = p.getParent().resolve("aeropuertos.txt");
+        Map<String, Aeropuerto> aeropuertos = cargarAeropuertos(aeropuertosPath);
+        Set<String> iatasValidas = aeropuertos.keySet();
+        return cargarPedidos(p, iatasValidas);
+    }
+    
+    public static List<CancellationRecord> leerCancelaciones(Path p, Map<String, Aeropuerto> aeropuertos, java.time.YearMonth periodo) throws IOException {
+        List<CancellationRecord> cancelaciones = new ArrayList<>();
+        if (p == null || !Files.exists(p)) return cancelaciones;
+        
+        for (String linea : Files.readAllLines(p)) {
+            if (linea.trim().isEmpty() || linea.startsWith("#")) continue;
+            
+            try {
+                // Formato: 01.LBSF-LOWW-12:08
+                // día.origen-destino-hora:minuto
+                String[] partesPrincipales = linea.split("\\.");
+                if (partesPrincipales.length != 2) continue;
+                
+                int dia = Integer.parseInt(partesPrincipales[0].trim());
+                String resto = partesPrincipales[1].trim();
+                
+                // Separar el resto: LBSF-LOWW-12:08
+                String[] partesResto = resto.split("-");
+                if (partesResto.length != 3) continue;
+                
+                String origen = partesResto[0].trim();
+                String destino = partesResto[1].trim();
+                String horaMinuto = partesResto[2].trim();
+                
+                // Parsear hora:minuto
+                String[] partesHora = horaMinuto.split(":");
+                if (partesHora.length != 2) continue;
+                
+                int hora = Integer.parseInt(partesHora[0].trim());
+                int minuto = Integer.parseInt(partesHora[1].trim());
+                
+                // Validate airports exist
+                if (!aeropuertos.containsKey(origen) || !aeropuertos.containsKey(destino)) {
+                    System.out.println("Skipping cancellation - unknown airport: " + origen + " or " + destino);
+                    continue;
+                }
+                
+                // Create LocalDate from day and period
+                LocalDate fecha = periodo.atDay(dia);
+                
+                // For timezone, we'll use UTC as default since we don't have timezone info
+                ZoneId tzOrigen = ZoneId.of("UTC");
+                
+                cancelaciones.add(new CancellationRecord(origen, destino, hora, minuto, fecha, tzOrigen));
+                System.out.println("Loaded cancellation: " + origen + "->" + destino + " on " + fecha + " at " + hora + ":" + String.format("%02d", minuto));
+                
+            } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                System.out.println("Error parsing cancellation line: " + linea + " - " + e.getMessage());
+                continue;
+            }
+        }
+        return cancelaciones;
+    }
 
 }

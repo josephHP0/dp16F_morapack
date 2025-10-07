@@ -1,497 +1,555 @@
 package com.morapack.planificador.nucleo;
 
-import com.morapack.planificador.dominio.*;
-import com.morapack.planificador.util.UtilArchivos;
+import com.morapack.planificador.dominio.Aeropuerto;
+import com.morapack.planificador.dominio.Pedido;
+import com.morapack.planificador.nucleo.GrafoVuelos.FlightInstance;
+import com.morapack.planificador.simulation.PlanResult;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.nio.file.*;
+import java.time.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
- * Planificador ACO con:
- * - Simulación semanal (día de inicio + número de días).
- * - Soporte de cancelaciones por día (dd.ORIGEN-DESTINO-HH:MM).
+ * Planificador con ACO "congestion-aware":
+ *  - Heurística penaliza congestión prevista en destino de cada tramo.
+ *  - Headroom gating: bloquea/encarece llegar a hubs sin salida neta suficiente.
+ *  - Reserva de salidas en hubs calientes.
+ *  - Actualiza backlog por buckets horarios mientras asigna.
+ *
+ * API público compatible con AppPlanificador.
  */
 public class PlanificadorAco {
 
-    // Región por IATA calculada desde el archivo de aeropuertos
-    private static final Map<String,String> REGION_BY_IATA = new HashMap<>();
+    // --------- Dependencias e índices ---------
+    private final GrafoVuelos grafo;
+    private final Map<String, Aeropuerto> aeropuertos;
+    private final ParametrosAco P;
 
-    // Hubs por región
-    public static final Map<String,String> HUBS = Map.of(
-            "SPIM","AM",  // Lima
-            "EBCI","EU",  // Bruselas
-            "UBBB","AS"   // Bakú
-    );
+    // Ventana vigente
+    private Instant wStart;
+    private Instant wEnd;
+    private int hours; // buckets
 
-    // ===== Tipos/auxiliares para cancelaciones =====
-    /** Registro de una cancelación concreta: día, origen, destino, salida (minutos). */
-    static final class Cancelacion {
-        final int dia;            // 1..31
-        final String origen;      // IATA
-        final String destino;     // IATA
-        final int salidaMin;      // minutos desde 00:00
+    // Índices de slots de vuelo para la ventana
+    private Map<String, FlightInstance> byId;
+    private Map<String, List<FlightInstance>> outByAp; // salidas por aeropuerto (ordenadas por salida)
+    private Map<String, List<FlightInstance>> inByAp;  // llegadas por aeropuerto (ordenadas por arribo)
 
-        Cancelacion(int dia, String origen, String destino, int salidaMin) {
-            this.dia = dia;
-            this.origen = origen;
-            this.destino = destino;
-            this.salidaMin = salidaMin;
-        }
+    // Capacidad remanente por instancia de vuelo (se actualiza al asignar)
+    private Map<String, Integer> capRemain;
+
+    // Pronóstico/ocupación por aeropuerto y bucket horario (se actualiza al asignar)
+    private Map<String, int[]> backlogByAp;    // unidades en almacén
+    private Map<String, int[]> outCapByAp;     // capacidad de salida total por bucket (asientos)
+    private Map<String, int[]> inCapByAp;      // capacidad de entrada total por bucket (informativa)
+
+    // Feromonas por arco (instancia de vuelo)
+    private final Map<String, Double> tau = new HashMap<>();
+
+    // Fuentes infinitas (se infiere del flag del aeropuerto)
+    private List<String> infiniteSources;
+
+    public PlanificadorAco(GrafoVuelos grafo, Map<String, Aeropuerto> aeropuertos) {
+        this(grafo, aeropuertos, ParametrosAco.defaults());
     }
 
-    /** Carga cancelaciones desde archivo (líneas: dd.ORIGEN-DESTINO-HH:MM). */
-    public static List<Cancelacion> cargarCancelaciones(Path path) throws IOException {
-        List<Cancelacion> out = new ArrayList<>();
-        if (path == null || !Files.exists(path)) return out;
-        try (BufferedReader br = Files.newBufferedReader(path)) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) continue;
-                // dd.ORIGEN-DESTINO-HH:MM
-                // Ej: 03.SKBO-SEQM-14:22
-                String[] partes = line.split("\\.");
-                if (partes.length != 2) continue;
-                int dia = Integer.parseInt(partes[0]);
-                String[] segs = partes[1].split("-");
-                if (segs.length != 3) continue;
-                String origen = segs[0].trim();
-                String destino = segs[1].trim();
-                String hhmm = segs[2].trim();
-                int salidaMin = hhmmAmin(hhmm);
-                out.add(new Cancelacion(dia, origen, destino, salidaMin));
-            }
-        }
-        return out;
+    public PlanificadorAco(GrafoVuelos grafo, Map<String, Aeropuerto> aeropuertos, ParametrosAco parametros) {
+        this.grafo = grafo;
+        this.aeropuertos = aeropuertos;
+        this.P = parametros == null ? ParametrosAco.defaults() : parametros;
     }
 
-    private static int hhmmAmin(String hhmm) {
-        String[] p = hhmm.split(":");
-        int h = Integer.parseInt(p[0]);
-        int m = Integer.parseInt(p.length > 1 ? p[1] : "0");
-        return h * 60 + m;
-    }
+    // ============================================================
+    // API principal
+    // ============================================================
 
-    /** Dado el listado de vuelos y cancelaciones, construye: día -> set(ids de vuelo cancelados ese día). */
-    public static Map<Integer, Set<Integer>> mapearCancelacionesAIdsPorDia(
-            List<Vuelo> vuelos,
-            List<Cancelacion> cancelaciones
-    ) {
-        Map<Integer, Set<Integer>> porDia = new HashMap<>();
-        if (cancelaciones == null || cancelaciones.isEmpty()) return porDia;
+    public PlanResult compilarPlanSemanal(Instant tStart, Instant tEnd, List<Pedido> pedidos, YearMonth periodo) {
+        inicializarVentana(tStart, tEnd);
+        indexarSlots(tStart, tEnd);
+        prepararPronosticoCapacidades();
+        inicializarFeromonas();
 
-        // Indexar por (origen, destino, salidaMin) -> lista ids
-        Map<String, List<Integer>> idx = new HashMap<>();
-        for (Vuelo v : vuelos) {
-            String key = v.origen + "|" + v.destino + "|" + v.salidaMin;
-            idx.computeIfAbsent(key, k -> new ArrayList<>()).add(v.id);
-        }
-
-        for (Cancelacion c : cancelaciones) {
-            String key = c.origen + "|" + c.destino + "|" + c.salidaMin;
-            List<Integer> ids = idx.getOrDefault(key, Collections.emptyList());
-            if (!ids.isEmpty()) {
-                porDia.computeIfAbsent(c.dia, k -> new HashSet<>()).addAll(ids);
-            }
-        }
-        return porDia;
-    }
-
-    // ====== utilidades de región / SLA (como tenías) ======
-    static String regionDe(String iata) {
-        return REGION_BY_IATA.getOrDefault(iata, "EU");
-    }
-
-    static String hubParaDestino(String destino) {
-        String region = regionDe(destino);
-        switch (region) {
-            case "AM": return "SPIM";   // Lima
-            case "EU": return "EBCI";   // Bruselas
-            case "AS": return "UBBB";   // Bakú
-            default:   return "EBCI";
-        }
-    }
-
-    static double slaHoras(String hub, String dest) {
-        // 48h mismo continente, 72h diferente continente; pequeño ajuste por recojo
-        double base = regionDe(hub).equals(regionDe(dest)) ? 48.0 : 72.0;
-        double recojoHoras = regionDe(hub).equals(regionDe(dest)) ? 2.0 : 1.0;
-        return Math.max(0, base - recojoHoras);
-    }
-
-    // ====== Construcción de ruta por hormiga — AHORA CON CANCELACIONES POR DÍA ======
-    private static Ruta construirRuta(String hub, String destino,
-                                      GrafoVuelos grafo,
-                                      double[] tau, double[] heuristica,
-                                      int pasosMax, double presupuestoHoras,
-                                      Map<Integer,Integer> capacidadRestante,
-                                      Map<String,Aeropuerto> aeropuertos,
-                                      Map<Integer,Vuelo> vuelosPorId,
-                                      int diaInicio, int horaInicio, int minutoInicio,
-                                      Map<Integer, Set<Integer>> cancelByDay,
-                                      Random rnd) {
-        Set<String> visitados = new HashSet<>();
-        visitados.add(hub);
-        String actual = hub;
-        double horas = 0.0;
-        Ruta ruta = new Ruta();
-        ruta.nodos.add(hub);
-
-        for (int s = 0; s < pasosMax && horas <= presupuestoHoras; s++) {
-            if (actual.equals(destino)) break;
-
-            var aristas = grafo.aristasDesde(actual);
-            if (aristas.isEmpty()) break;
-
-            List<GrafoVuelos.Arista> candidatos = new ArrayList<>();
-            List<Double> pesos = new ArrayList<>();
-
-            for (var e : aristas) {
-                String nextIata = e.b;
-                Aeropuerto next = aeropuertos.get(nextIata);
-                if (next == null) continue;
-
-                Vuelo vuelo = vuelosPorId.get(e.vueloId);
-                if (vuelo == null) continue;
-
-                if (visitados.contains(nextIata)) continue; // evita ciclos simples
-                Integer capRest = capacidadRestante.getOrDefault(e.vueloId, 0);
-                if (capRest <= 0) continue;
-
-                // Tiempo transcurrido absoluto desde el inicio del pedido
-                int horasDelDia = (horaInicio + (int) Math.floor(horas)) % 24;
-                int minutosDelDia = (minutoInicio + (int) Math.round((horas % 1.0) * 60)) % 60;
-
-                // Calcular día real del mes en este salto
-                int diasTranscurridos = (horaInicio * 60 + minutoInicio + (int) Math.round(horas * 60)) / (24 * 60);
-                int diaActual = diaInicio + diasTranscurridos;
-                if (diaActual > 31) break; // fuera de mes
-
-                // Si el vuelo está cancelado ese día, no es candidato
-                if (cancelByDay != null && !cancelByDay.isEmpty()) {
-                    Set<Integer> cancelsHoy = cancelByDay.getOrDefault(diaActual, Collections.emptySet());
-                    if (cancelsHoy.contains(e.vueloId)) {
-                        continue;
-                    }
-                }
-
-                // Ajustar espera: si ya pasó la hora de salida, se espera al siguiente día
-                int tiempoActualEnMinutos = horasDelDia * 60 + minutosDelDia;
-                int salida = vuelo.salidaMin;
-                int minutosEspera;
-                if (salida >= tiempoActualEnMinutos) {
-                    minutosEspera = salida - tiempoActualEnMinutos;
-                } else {
-                    // espera hasta mañana
-                    minutosEspera = (24 * 60 - tiempoActualEnMinutos) + salida;
-                    // ojo: el vuelo saldrá el *díaActual+1*, validar cancelación también mañana
-                    int diaManiana = diaActual + 1;
-                    if (cancelByDay != null && !cancelByDay.isEmpty()) {
-                        Set<Integer> cancelsManiana = cancelByDay.getOrDefault(diaManiana, Collections.emptySet());
-                        if (cancelsManiana.contains(e.vueloId)) {
-                            // si mañana también está cancelado, descartamos
-                            continue;
-                        }
-                    }
-                    if (diaManiana > 31) continue;
-                }
-
-                // Score ACO
-                double tauVal = tau[e.vueloId];
-                double heurVal = heuristica[e.vueloId];
-                double eps = 1e-9;
-                double alpha = 1.0, beta = 2.0;
-                double score = Math.pow(Math.max(tauVal, eps), alpha) * Math.pow(Math.max(heurVal, eps), beta);
-                candidatos.add(e);
-                pesos.add(score);
-            }
-
-            if (candidatos.isEmpty()) break;
-
-            // Ruleta proporcional
-            double suma = pesos.stream().mapToDouble(d -> d).sum();
-            double r = rnd.nextDouble() * (suma <= 0 ? 1.0 : suma);
-            double acc = 0.0;
-            int idx = candidatos.size() - 1; // fallback
-            for (int i = 0; i < candidatos.size(); i++) {
-                acc += (suma <= 0 ? (1.0 / candidatos.size()) : pesos.get(i));
-                if (r <= acc) { idx = i; break; }
-            }
-            GrafoVuelos.Arista elegido = candidatos.get(idx);
-            Vuelo v = vuelosPorId.get(elegido.vueloId);
-            if (v == null) break;
-
-            // Aplicar tiempos (espera + vuelo)
-            int horasDelDia = (horaInicio + (int) Math.floor(horas)) % 24;
-            int minutosDelDia = (minutoInicio + (int) Math.round((horas % 1.0) * 60)) % 60;
-            int tiempoActualEnMinutos = horasDelDia * 60 + minutosDelDia;
-
-            int salida = v.salidaMin;
-            double esperaHoras;
-            if (salida >= tiempoActualEnMinutos) {
-                esperaHoras = (salida - tiempoActualEnMinutos) / 60.0;
-            } else {
-                esperaHoras = ((24 * 60 - tiempoActualEnMinutos) + salida) / 60.0;
-            }
-
-            horas += esperaHoras + elegido.horas;
-            capacidadRestante.put(elegido.vueloId, capacidadRestante.getOrDefault(elegido.vueloId, 0) - 1);
-
-            ruta.vuelosUsados.add(elegido.vueloId);
-            ruta.itinerario.add(actual + "->" + elegido.b + " (" + String.format(Locale.US, "%.2f", elegido.horas) + "h)");
-            actual = elegido.b;
-            ruta.nodos.add(actual);
-
-            if (actual.equals(destino)) break;
-        }
-
-        if (!actual.equals(destino)) return null;
-        ruta.horasTotales = horas;
-        return ruta;
-    }
-
-    // ====== Planificador ACO (versión original) ======
-    public static List<Asignacion> planificarConAco(
-            Map<String,Aeropuerto> aeropuertos,
-            List<Vuelo> vuelos,
-            List<Pedido> pedidos,
-            ParametrosAco p,
-            long semillaAleatoria
-    ) {
-        return planificarConAco(aeropuertos, vuelos, pedidos, p, semillaAleatoria,
-                /*cancelByDay*/ Collections.emptyMap(), /*diaInicioPlan*/ 1);
-    }
-
-    // ====== Planificador ACO con cancelaciones (sobre carga) ======
-    public static List<Asignacion> planificarConAco(
-            Map<String,Aeropuerto> aeropuertos,
-            List<Vuelo> vuelos,
-            List<Pedido> pedidos,
-            ParametrosAco p,
-            long semillaAleatoria,
-            Map<Integer, Set<Integer>> cancelByDay,
-            int diaInicioPlan
-    ) {
-        // Cargar regiones por IATA
-        REGION_BY_IATA.clear();
-        for (Aeropuerto ap : aeropuertos.values()) {
-            if (ap.continente != null && !ap.continente.isBlank()) {
-                REGION_BY_IATA.put(ap.codigo, ap.continente);
-            }
-        }
-
-        // Crear mapa de vuelos por ID para acceso rápido
-        Map<Integer, Vuelo> vuelosPorId = new HashMap<>();
-        for (Vuelo v : vuelos) vuelosPorId.put(v.id, v);
-
-        GrafoVuelos grafo = new GrafoVuelos(vuelos);
-        double[] tau = new double[vuelos.size()];
-        double[] heur = new double[vuelos.size()];
-        Arrays.fill(tau, 0.1);
-
-        // Heurística basada en distancia, duración y capacidad disponible (inicial)
-        for (Vuelo v : vuelos) {
-            Aeropuerto a1 = aeropuertos.get(v.origen);
-            Aeropuerto a2 = aeropuertos.get(v.destino);
-            double heurVal = 1e-6;
-            if (a1 != null && a2 != null) {
-                double dist = UtilArchivos.distanciaKm(a1, a2);
-                double durHoras = v.horasDuracion;
-                if (dist <= 0 || Double.isInfinite(dist) || Double.isNaN(dist)) dist = 1e6;
-                // Simple (puedes refinar): 1 / (dist * dur) y ligero boost por capacidad nominal
-                heurVal = 1.0 / (dist * Math.max(0.1, durHoras));
-                heurVal *= Math.max(1.0, v.capacidad / 100.0);
-            }
-            heur[v.id] = heurVal;
-        }
-
-        // Capacidad restante (reset por planificación)
-        Map<Integer,Integer> capRest = new HashMap<>();
-        for (Vuelo v : vuelos) capRest.put(v.id, v.capacidad);
-
-        List<Asignacion> resultado = new ArrayList<>();
-        Random rnd = new Random(semillaAleatoria);
-
-        // Limpiar ocupación de aeropuertos para esta corrida
-        for (Aeropuerto ap : aeropuertos.values()) {
-            ap.ocupacionPorMinuto.clear();
-        }
-
-        for (Pedido ped : pedidos) {
-            String hub = hubParaDestino(ped.destinoIata);
-            double presupuesto = slaHoras(hub, ped.destinoIata);
-
-            Ruta mejor = null;
-            for (int it=0; it<p.iteraciones; it++) {
-                for (int h=0; h<p.hormigas; h++) {
-                    Ruta r = construirRuta(
-                            hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto,
-                            capRest, aeropuertos, vuelosPorId,
-                            ped.dia, ped.hora, ped.minuto,
-                            cancelByDay,
-                            rnd
-                    );
-                    if (r != null && (mejor==null || r.horasTotales < mejor.horasTotales)) mejor = r;
-                }
-                // evaporación
-                for (int i=0;i<tau.length;i++) tau[i] *= (1.0 - p.rho);
-                // refuerzo
-                if (mejor != null) {
-                    double dep = p.Q / (1.0 + mejor.horasTotales);
-                    for (int fid : mejor.vuelosUsados) tau[fid] += dep;
-                }
-            }
-
-            int paquetesRestantes = ped.paquetes;
-            // Permitir hasta 3 rutas alternativas por pedido
-            int intentosRuta = 0;
-            while (paquetesRestantes > 0 && mejor != null && intentosRuta < 3) {
-                intentosRuta++;
-                Asignacion asg = new Asignacion();
-                asg.pedido = ped;
-                asg.hubOrigen = hub;
-                asg.ruta = mejor;
-                asg.paquetesAsignados = 0;
-                asg.paquetesPendientes = paquetesRestantes;
-
-                // cuello de botella: vuelos + almacén destino (ocupa 120 minutos al llegar)
-                int cuelloVuelo = Integer.MAX_VALUE;
-                for (int fid : mejor.vuelosUsados) {
-                    cuelloVuelo = Math.min(cuelloVuelo, capRest.getOrDefault(fid, 0));
-                }
-                Aeropuerto apDest = aeropuertos.get(ped.destinoIata);
-                int cuelloAlmacen = Integer.MAX_VALUE;
-                if (apDest != null) {
-                    int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
-                    int ocupMax = 0;
-                    for (int m = minutoLlegada; m < minutoLlegada + 120; m++) {
-                        ocupMax = Math.max(ocupMax, apDest.ocupacionPorMinuto.getOrDefault(m,0));
-                    }
-                    cuelloAlmacen = Math.max(0, apDest.capacidad - ocupMax);
-                }
-                int asignable = Math.max(0, Math.min(paquetesRestantes, Math.min(cuelloVuelo, cuelloAlmacen)));
-
-                if (asignable > 0) {
-                    for (int fid : mejor.vuelosUsados) {
-                        capRest.put(fid, capRest.get(fid) - asignable);
-                    }
-                    if (apDest != null) {
-                        int minutoLlegada = ped.dia * 24 * 60 + ped.hora * 60 + ped.minuto + (int)(mejor.horasTotales * 60);
-                        for (int m = minutoLlegada; m < minutoLlegada + 120; m++) {
-                            apDest.ocupacionPorMinuto.put(m, apDest.ocupacionPorMinuto.getOrDefault(m, 0) + asignable);
-                        }
-                    }
-                    asg.paquetesAsignados = asignable;
-                    asg.paquetesPendientes = paquetesRestantes - asignable;
-                    paquetesRestantes -= asignable;
-                }
-
-                resultado.add(asg);
-
-                // Si quedan paquetes, busca otra mejor ruta (pocas iteraciones)
-                if (paquetesRestantes > 0) {
-                    Ruta mejorAlt = null;
-                    double mejorHoras = Double.POSITIVE_INFINITY;
-                    for (int it=0; it<5; it++) {
-                        for (int h=0; h<15; h++) {
-                            Ruta r = construirRuta(
-                                    hub, ped.destinoIata, grafo, tau, heur, p.pasosMax, presupuesto,
-                                    capRest, aeropuertos, vuelosPorId,
-                                    ped.dia, ped.hora, ped.minuto,
-                                    cancelByDay,
-                                    rnd
-                            );
-                            if (r != null && r.horasTotales < mejorHoras) {
-                                mejorHoras = r.horasTotales;
-                                mejorAlt = r;
-                            }
-                        }
-                    }
-                    if (mejorHoras == Double.POSITIVE_INFINITY || mejorAlt == null) break;
-                    mejor = mejorAlt;
-                }
-            }
-        }
-        return resultado;
-    }
-
-    // ====== Simulador semanal ======
-    /**
-     * Simula una semana (o N días) planificando día a día.
-     * - Filtra pedidos del día D.
-     * - Aplica cancelaciones del día D (Map<Integer,Set<vueloId>>).
-     * - Resetea la capacidad de vuelos por día (operación diaria).
-     * - Devuelve el plan consolidado.
-     */
-    public static List<Asignacion> simularSemana(
-            Map<String, Aeropuerto> aeropuertos,
-            List<Vuelo> vuelos,
-            List<Pedido> pedidos,
-            ParametrosAco parametros,
-            Path archivoCancelaciones,
-            int diaInicio,            // ej. 1
-            int numeroDias,          // ej. 7
-            long semilla
-    ) throws IOException {
-
-        // Cargar cancelaciones y mapear a ids por día
-        List<Cancelacion> cancels = cargarCancelaciones(archivoCancelaciones);
-        Map<Integer, Set<Integer>> cancelByDay = mapearCancelacionesAIdsPorDia(vuelos, cancels);
-
-        List<Asignacion> consolidado = new ArrayList<>();
-
-        // Ordenar pedidos por (dia, hora, minuto) por prolijidad
+        // Orden sugerido: por fecha de registro asc y, a igualdad, por cantidad desc
         pedidos.sort(Comparator
-                .comparingInt((Pedido p) -> p.dia)
-                .thenComparingInt(p -> p.hora)
-                .thenComparingInt(p -> p.minuto));
+                .comparing((Pedido p) -> getFechaRegistro(p))
+                .thenComparing((Pedido p) -> -getCantidad(p)));
 
-        for (int d = 0; d < numeroDias; d++) {
-            int diaSim = diaInicio + d;
-            if (diaSim > 31) break;
+        List<Asignacion> asignaciones = new ArrayList<>();
+        Random rnd = new Random(42);
 
-            // Pedidos del día
-            List<Pedido> pedidosDelDia = new ArrayList<>();
-            for (Pedido p : pedidos) if (p.dia == diaSim) pedidosDelDia.add(p);
+        System.out.println("🚀 Iniciando planificación ACO para " + pedidos.size() + " pedidos...");
+        int pedidoCount = 0;
 
-            if (pedidosDelDia.isEmpty()) continue;
+        for (Pedido pedido : pedidos) {
+            pedidoCount++;
+            if (pedidoCount % 10 == 0 || pedidoCount <= 5) {
+                System.out.println("   📦 Procesando pedido " + pedidoCount + "/" + pedidos.size() + " (ID: " + pedido.id + ")");
+            }
+            
+            String dest = getDestinoIata(pedido);
+            int qty = getCantidad(pedido);
+            Instant t0 = max(getFechaRegistro(pedido), wStart);
 
-            // IMPORTANTE: limpiar ocupación por minuto para la corrida del día
-            for (Aeropuerto ap : aeropuertos.values()) ap.ocupacionPorMinuto.clear();
-
-            // Planificar para ese día (aplicando únicamente cancelaciones del día 'diaSim')
-            Map<Integer, Set<Integer>> cancelSoloHoy = new HashMap<>();
-            if (cancelByDay.containsKey(diaSim)) {
-                cancelSoloHoy.put(diaSim, cancelByDay.get(diaSim));
+            // Elige mejor origen entre fuentes infinitas
+            RouteSolution best = null;
+            for (String source : infiniteSources) {
+                RouteSolution sol = buscarRutaACO(source, dest, t0, qty, rnd);
+                if (sol != null && (best == null || sol.totalCost < best.totalCost)) {
+                    best = sol;
+                }
             }
 
-            List<Asignacion> planDelDia = planificarConAco(
-                    aeropuertos,
-                    clonarVuelosConCapacidad(vuelos), // capacidad diaria
-                    pedidosDelDia,
-                    parametros,
-                    semilla + diaSim,
-                    cancelSoloHoy,
-                    diaSim // para consistencia en tiempos base
-            );
+            if (best != null) {
+                // Commitear: reservar capacidades y actualizar backlog
+                aplicarCompromisos(best, qty);
+                asignaciones.add(crearAsignacion(pedido, best));
+                // Depositar feromonas
+                depositarFeromonas(best, qty);
+            } else {
+                // Ruta no encontrada: se deja sin asignar (el simulador reportará colapso si procede)
+                asignaciones.add(crearAsignacionFallida(pedido));
+            }
 
-            consolidado.addAll(planDelDia);
+            // Evaporación ligera por pedido para favorecer exploración
+            evaporarFeromonas(P.rho * 0.25);
         }
 
-        return consolidado;
+        // Construir PlanResult con las asignaciones generadas
+        return construirResultado(asignaciones);
     }
 
-    /** Clona la lista de vuelos con la misma capacidad (reset diario). */
-    private static List<Vuelo> clonarVuelosConCapacidad(List<Vuelo> vuelos) {
-        List<Vuelo> copia = new ArrayList<>(vuelos.size());
-        for (Vuelo v : vuelos) {
-            copia.add(new Vuelo(
-                    v.id, v.origen, v.destino, v.salidaMin, v.llegadaMin,
-                    v.capacidad, (int) Math.round(v.horasDuracion * 60), v.esContinental
-            ));
+    // ============================================================
+    // Búsqueda de ruta con ACO (una ejecución por pedido)
+    // ============================================================
+
+    private RouteSolution buscarRutaACO(String sourceAp, String destAp, Instant startAt, int qty, Random rnd) {
+        int ants = 3;   // Muy reducido para pruebas rápidas
+        int iters = 1;  // Solo 1 iteración
+        RouteSolution globalBest = null;
+
+        for (int it = 0; it < iters; it++) {
+            RouteSolution iterationBest = null;
+            for (int a = 0; a < ants; a++) {
+                RouteSolution sol = construirRutaProbabilistica(sourceAp, destAp, startAt, qty, rnd);
+                if (sol != null && (iterationBest == null || sol.totalCost < iterationBest.totalCost)) {
+                    iterationBest = sol;
+                }
+            }
+            if (iterationBest != null && (globalBest == null || iterationBest.totalCost < globalBest.totalCost)) {
+                globalBest = iterationBest;
+            }
+            // Evaporación por iteración
+            evaporarFeromonas(P.rho);
+            if (iterationBest != null) depositarFeromonas(iterationBest, qty);
         }
-        return copia;
+
+        return globalBest;
+    }
+
+    private RouteSolution construirRutaProbabilistica(String sourceAp, String destAp, Instant startAt, int qty, Random rnd) {
+        String ap = sourceAp;
+        Instant currentTime = startAt;
+        List<FlightInstance> path = new ArrayList<>();
+        double totalCost = 0.0;
+
+        for (int hop = 0; hop < P.maxHops; hop++) {
+            final Instant t = currentTime; // Variable final para uso en lambdas
+            
+            // Candidatos: vuelos que salen de 'ap' con depart >= t y capacidad suficiente
+            List<FlightInstance> candidates = candidatosSalientes(ap, t, qty);
+            if (candidates.isEmpty()) return null;
+
+            // Top-K por heurística (lista candidata)
+            candidates.sort(Comparator.comparingDouble(fi -> heuristica(fi, destAp, t, qty)));
+            if (candidates.size() > P.candidateK) {
+                candidates = candidates.subList(0, P.candidateK);
+            }
+
+            // Selección probabilística por ACO
+            double sum = 0.0;
+            double[] w = new double[candidates.size()];
+            for (int i = 0; i < candidates.size(); i++) {
+                FlightInstance fi = candidates.get(i);
+                double tau_ij = tau.getOrDefault(fi.instanceId, P.pheromoneInit);
+                double eta_ij = 1.0 / (1.0 + heuristica(fi, destAp, t, qty)); // menor costo => mayor "atractivo"
+                double weight = Math.pow(tau_ij, P.alpha) * Math.pow(eta_ij, P.beta);
+                w[i] = weight;
+                sum += weight;
+            }
+            if (sum <= 0) return null;
+            double r = rnd.nextDouble() * sum;
+            int chosen = 0;
+            for (; chosen < w.length; chosen++) {
+                r -= w[chosen];
+                if (r <= 0) break;
+            }
+            if (chosen >= candidates.size()) chosen = candidates.size() - 1;
+
+            FlightInstance next = candidates.get(chosen);
+
+            // Chequeos finales: headroom y reserva de salida en destino del tramo
+            if (!headroomOK(next.destino, next.arrUtc, qty)) {
+                // si no hay headroom, intentamos la siguiente alternativa si existe
+                boolean foundAlt = false;
+                for (int i = 0; i < candidates.size(); i++) {
+                    if (i == chosen) continue;
+                    FlightInstance alt = candidates.get(i);
+                    if (headroomOK(alt.destino, alt.arrUtc, qty)) {
+                        next = alt;
+                        foundAlt = true;
+                        break;
+                    }
+                }
+                if (!foundAlt) return null;
+            }
+
+            // Acumular costo y avanzar
+            double c = heuristica(next, destAp, t, qty);
+            totalCost += c;
+            path.add(next);
+            ap = next.destino;
+            currentTime = next.arrUtc.plus(P.dwellMin); // dwell mínimo para encadenar
+
+            if (ap.equals(destAp)) {
+                return new RouteSolution(path, totalCost);
+            }
+        }
+        return null;
+    }
+
+    // ============================================================
+    // Heurística "congestion-aware" y gating
+    // ============================================================
+
+    private double heuristica(FlightInstance fi, String destFinal, Instant currentTime, int qty) {
+        // Normalizaciones
+        double timeNorm = Math.max(0, Duration.between(currentTime, fi.arrUtc).toHours()) /
+                (double) Math.max(1, P.etaRef.toHours());
+
+        // Espera estimada de conexión en el aeropuerto de llegada (miramos la siguiente salida disponible)
+        double waitNorm = estimateWaitNorm(fi.destino, fi.arrUtc);
+
+        // Riesgo SLA: aproximación con deadline de 72h si no hay información continental
+        double slaHours = 72.0;
+        double arrivalToFinalETA = estimateFastestETA(fi.destino, destFinal, fi.arrUtc.plus(P.dwellMin));
+        double riskSLA = arrivalToFinalETA > slaHours ? (arrivalToFinalETA - slaHours) / slaHours : 0.0;
+
+        // Congestión prevista en destino del tramo en su hora de arribo
+        double u = occupancyFraction(fi.destino, fi.arrUtc, qty);
+        double congPenalty = P.congestionPenalty(u);
+
+        // Hops penaliza levemente
+        double hopsPenalty = P.w_hops; // se suma por tramo
+
+        return P.w_time * timeNorm + P.w_wait * waitNorm + P.w_sla * riskSLA + P.w_cong * congPenalty + hopsPenalty;
+    }
+
+    private boolean headroomOK(String airport, Instant arr, int qty) {
+        Aeropuerto ap = aeropuertos.get(airport);
+        if (ap == null) return false;
+        if (isInfinite(ap)) return true;
+
+        int capAlmacen = Math.max(1, ap.getCapacidadAlmacen()); // evitar div/0
+        int bi = bucket(arr);
+        int bEnd = Math.min(hours - 1, bi + (int) (P.headroomHorizon.toHours()));
+        int[] backlog = backlogByAp.get(airport);
+        int[] outCap = outCapByAp.get(airport);
+
+        long stock = 0;
+        for (int b = bi; b <= bEnd; b++) stock = Math.max(stock, backlog[b] + qty); // pico
+        // headroom neto en la ventana = sum(salidas) - pico_stock (aprox conservadora)
+        long salidas = 0;
+        for (int b = bi; b <= bEnd; b++) salidas += outCap[b];
+
+        boolean warehouseOK = (backlog[bi] + qty) <= capAlmacen; // no romper capacidad instantánea
+        boolean flowOK = salidas >= stock; // hay “escape” suficiente en H
+
+        return warehouseOK && flowOK;
+    }
+
+    private double estimateWaitNorm(String airport, Instant arr) {
+        // próxima salida ≥ arr + dwellMin
+        Instant t = arr.plus(P.dwellMin);
+        List<FlightInstance> outs = outByAp.getOrDefault(airport, List.of());
+        FlightInstance next = null;
+        for (FlightInstance x : outs) {
+            if (!x.depUtc.isBefore(t)) { next = x; break; }
+        }
+        if (next == null) return 1.0; // nada a la vista → espera mala
+        long waitH = Duration.between(arr, next.depUtc).toHours();
+        return Math.min(2.0, waitH / (double) Math.max(1, P.waitRef.toHours())); // acotar
+    }
+
+    private double occupancyFraction(String airport, Instant atArr, int incomingQty) {
+        Aeropuerto ap = aeropuertos.get(airport);
+        if (ap == null || isInfinite(ap)) return 0.0;
+        int cap = Math.max(1, ap.getCapacidadAlmacen());
+        int b = bucket(atArr);
+        int occ = backlogByAp.get(airport)[b] + incomingQty;
+        return Math.min(1.5, occ / (double) cap); // permitimos >1 para penalización fuerte
+    }
+
+    // ETA más rápida (aprox) ignorando capacidades: greedy al siguiente salto más temprano
+    private double estimateFastestETA(String from, String to, Instant startAt) {
+        if (from.equals(to)) return 0.0;
+        // Búsqueda limitada a 6 hops y 48h
+        Instant limit = startAt.plus(Duration.ofHours(48));
+        String ap = from;
+        Instant t = startAt;
+
+        for (int hop = 0; hop < 6; hop++) {
+            List<FlightInstance> outs = outByAp.getOrDefault(ap, List.of());
+            FlightInstance best = null;
+            for (FlightInstance fi : outs) {
+                if (fi.depUtc.isBefore(t)) continue;
+                if (fi.arrUtc.isAfter(limit)) continue;
+                if (best == null || fi.arrUtc.isBefore(best.arrUtc)) best = fi;
+            }
+            if (best == null) break;
+            ap = best.destino;
+            t = best.arrUtc.plus(P.dwellMin);
+            if (ap.equals(to)) {
+                return Duration.between(startAt, best.arrUtc).toHours();
+            }
+        }
+        return 72.0; // penalizar si no encontramos algo razonable
+    }
+
+    // ============================================================
+    // Candidatos y chequeos de capacidad
+    // ============================================================
+
+    private List<FlightInstance> candidatosSalientes(String ap, Instant t, int qty) {
+        List<FlightInstance> outs = outByAp.getOrDefault(ap, List.of());
+        List<FlightInstance> res = new ArrayList<>();
+        for (FlightInstance fi : outs) {
+            if (fi.depUtc.isBefore(t)) continue;
+
+            // Capacidad disponible en el vuelo considerando la reserva para tránsito
+            int rem = capRemain.getOrDefault(fi.instanceId, fi.capacidad);
+            int reserved = (int) Math.floor(fi.capacidad * P.reserveTransitRatio);
+            int usable = Math.max(0, rem - reserved);
+
+            if (usable >= qty) {
+                res.add(fi);
+            }
+        }
+        return res;
+    }
+
+    // ============================================================
+    // Commit de asignaciones y mantenimiento de estados
+    // ============================================================
+
+    private void aplicarCompromisos(RouteSolution sol, int qty) {
+        // 1) Reducir capacidad de vuelos
+        for (FlightInstance fi : sol.path) {
+            int rem = capRemain.getOrDefault(fi.instanceId, fi.capacidad);
+            capRemain.put(fi.instanceId, Math.max(0, rem - qty));
+        }
+        // 2) Actualizar backlog por aeropuerto entre ARRIVAL y próxima DEPARTURE usada en la ruta
+        //    Para cada hop, el paquete ocupa espacio en el almacén de destino desde la llegada
+        //    hasta el despegue del siguiente tramo (o 2h si es destino final).
+        for (int i = 0; i < sol.path.size(); i++) {
+            FlightInstance fi = sol.path.get(i);
+            String airport = fi.destino;
+            Instant from = fi.arrUtc;
+            Instant to;
+            if (i < sol.path.size() - 1) {
+                to = sol.path.get(i + 1).depUtc; // hasta la salida real del siguiente
+            } else {
+                to = fi.arrUtc.plus(Duration.ofHours(2)); // ventana de pickup en destino final
+            }
+            incrementarBacklog(airport, from, to, qty);
+        }
+    }
+
+    private void incrementarBacklog(String airport, Instant from, Instant to, int qty) {
+        if (!backlogByAp.containsKey(airport)) return;
+        int bi = bucket(from);
+        int bj = bucket(to);
+        int[] arr = backlogByAp.get(airport);
+        for (int b = Math.max(0, bi); b <= Math.min(hours - 1, bj); b++) {
+            arr[b] += qty;
+        }
+    }
+
+    // ============================================================
+    // Feromonas
+    // ============================================================
+
+    private void inicializarFeromonas() {
+        for (String id : byId.keySet()) { 
+            tau.put(id, P.pheromoneInit);
+        }
+    }
+
+    private void evaporarFeromonas(double rho) {
+        for (Map.Entry<String, Double> e : tau.entrySet()) {
+            double v = e.getValue();
+            v = Math.max(P.pheromoneFloor, (1.0 - rho) * v);
+            e.setValue(v);
+        }
+    }
+
+    private void depositarFeromonas(RouteSolution sol, int qty) {
+        // Depósito inverso al costo, ponderado por cantidad (más “señal” para paquetes grandes)
+        double delta = qty / Math.max(1.0, sol.totalCost + 1e-6);
+        for (FlightInstance fi : sol.path) {
+            double v = tau.getOrDefault(fi.instanceId, P.pheromoneInit);
+            tau.put(fi.instanceId, v + delta);
+        }
+    }
+
+    // ============================================================
+    // Preparación de ventana/índices y forecast de capacidades
+    // ============================================================
+
+    private void inicializarVentana(Instant tStart, Instant tEnd) {
+        this.wStart = tStart;
+        this.wEnd = tEnd;
+        this.hours = (int) Math.max(1, Duration.between(tStart, tEnd).toHours());
+        // Fuentes infinitas
+        this.infiniteSources = aeropuertos.values().stream()
+                .filter(this::isInfinite)
+                .map(Aeropuerto::getIata)
+                .toList();
+    }
+
+    private void indexarSlots(Instant tStart, Instant tEnd) {
+        List<FlightInstance> slots = grafo.expandirSlots(tStart, tEnd, aeropuertos);
+
+        // byId
+        this.byId = new HashMap<>();
+        for (FlightInstance fi : slots) {
+            byId.put(fi.instanceId, fi);
+        }
+
+        // salidas por aeropuerto (ordenadas)
+        this.outByAp = slots.stream()
+                .collect(Collectors.groupingBy(fi -> fi.origen));
+        for (List<FlightInstance> list : outByAp.values()) {
+            list.sort(Comparator.comparing(fi -> fi.depUtc));
+        }
+
+        // llegadas por aeropuerto (ordenadas)
+        this.inByAp = slots.stream()
+                .collect(Collectors.groupingBy(fi -> fi.destino));
+        for (List<FlightInstance> list : inByAp.values()) {
+            list.sort(Comparator.comparing(fi -> fi.arrUtc    ));
+        }
+
+        // capacidades remanentes iniciales
+        this.capRemain = new HashMap<>();
+        for (FlightInstance fi : slots) {
+            capRemain.put(fi.instanceId, fi.capacidad);
+        }
+    }
+
+    private void prepararPronosticoCapacidades() {
+        this.backlogByAp = new HashMap<>();
+        this.outCapByAp = new HashMap<>();
+        this.inCapByAp = new HashMap<>();
+
+        for (String ap : aeropuertos.keySet()) {
+            backlogByAp.put(ap, new int[hours]);
+            outCapByAp.put(ap, new int[hours]);
+            inCapByAp.put(ap, new int[hours]);
+        }
+
+        // poblar in/out por bucket a partir de los slots
+        for (List<FlightInstance> outs : outByAp.values()) {
+            for (FlightInstance fi : outs) {
+                int b = bucket(fi.depUtc);
+                int[] arr = outCapByAp.get(fi.origen);
+                if (b >= 0 && b < hours) arr[b] += fi.capacidad;
+            }
+        }
+        for (List<FlightInstance> ins : inByAp.values()) {
+            for (FlightInstance fi : ins) {
+                int b = bucket(fi.arrUtc);
+                int[] arr = inCapByAp.get(fi.destino);
+                if (b >= 0 && b < hours) arr[b] += fi.capacidad;
+            }
+        }
+    }
+
+    // ============================================================
+    // Utilidades de tiempo y acceso a entidades
+    // ============================================================
+
+    private int bucket(Instant t) {
+        if (t.isBefore(wStart)) return 0;
+        if (t.isAfter(wEnd) || t.equals(wEnd)) return hours - 1;
+        int b = (int) Duration.between(wStart, t).toHours();
+        // Garantizar que el bucket esté dentro del rango válido [0, hours-1]
+        return Math.min(b, hours - 1);
+    }
+
+    private boolean isInfinite(Aeropuerto ap) {
+        // TODO: si tu getter/flag difiere, cámbialo aquí
+        return ap.isInfiniteSource() || ap.getCapacidadAlmacen() >= Integer.MAX_VALUE / 4;
+    }
+
+    private Instant max(Instant a, Instant b) {
+        return a.isAfter(b) ? a : b;
+    }
+
+    // ============================================================
+    // Construcción de objetos externos (Adaptar si tus POJOs difieren)
+    // ============================================================
+
+    private Asignacion crearAsignacion(Pedido pedido, RouteSolution sol) {
+        // TODO: ajusta a tu constructor real de Asignacion.
+        // Crear una ruta a partir de los FlightInstance
+        Ruta ruta = new Ruta();
+        for (var fi : sol.path) {
+            ruta.tramos.add(new Ruta.Tramo(fi.instanceId, fi.origen + "-" + fi.destino, 
+                                          fi.origen, fi.destino, fi.depUtc, fi.arrUtc));
+        }
+        
+        // Asumir que se asignaron todos los paquetes del pedido
+        return new Asignacion(pedido, null, ruta, pedido.paquetes, 0);
+    }
+
+    private Asignacion crearAsignacionFallida(Pedido pedido) {
+        // Marcamos una asignación vacía; el simulador sabrá que no se encontró ruta
+        return new Asignacion(pedido, null, null, 0, pedido.paquetes);
+    }
+
+    private PlanResult construirResultado(List<Asignacion> asignaciones) {
+        // TODO: adapta si tu PlanResult tiene otro constructor o builder.
+        return new PlanResult(asignaciones);
+    }
+
+    // ============================================================
+    // Getters tolerantes (evita romper por nombres distintos)
+    // ============================================================
+
+    private String getDestinoIata(Pedido p) {
+        return p.destinoIata; // Acceso directo al campo público
+    }
+
+    private int getCantidad(Pedido p) {
+        return p.paquetes; // Acceso directo al campo público
+    }
+
+    private Instant getFechaRegistro(Pedido p) {
+        return LocalDateTime.of(2025, 11, p.dia, p.hora, p.minuto)
+                .atZone(ZoneId.systemDefault())
+                .toInstant(); // Construir Instant a partir de los campos fecha/hora
+    }
+
+    // ============================================================
+    // Tipos internos
+    // ============================================================
+
+    private static class RouteSolution {
+        final List<FlightInstance> path;
+        final double totalCost;
+        RouteSolution(List<FlightInstance> path, double totalCost) {
+            this.path = path;
+            this.totalCost = totalCost;
+        }
     }
 }
