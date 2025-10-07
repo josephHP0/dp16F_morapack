@@ -41,7 +41,7 @@ public class RealTimeConsole {
         // ====== Paths ======
         Path aeropTxt = Path.of(args.length > 0 ? args[0] : "data/aeropuertos.txt");
         Path vuelosTxt = Path.of(args.length > 1 ? args[1] : "data/vuelos.txt");
-        Path pedidosTxt = Path.of(args.length > 2 ? args[2] : "data/pedidos2.txt");
+        Path pedidosTxt = Path.of(args.length > 2 ? args[2] : "data/pedidos_mensual.txt");
         Path cancelTxt  = Path.of(args.length > 3 ? args[3] : "data/cancelaciones.txt");
 
         // ====== Velocidad y tick ======
